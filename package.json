@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "DSH plugin: sync models from relay /models endpoints and fill missing reasoningEfforts on llm-pi-ai routes | DSH 中转站模型同步与思考等级补全",
+  "description": "DSH plugin: sync models from relay /models endpoints, fill missing reasoningEfforts, and declare image input on llm-pi-ai routes | DSH 中转站模型同步、思考等级补全与多模态声明",
   "license": "MIT",
   "main": "lib/index.js",
   "exports": {
@@ -17,6 +17,7 @@
   },
   "files": [
     "lib",
+    "docs",
     "cordis.patch.yml",
     "README.md"
   ],
@@ -25,7 +26,9 @@
     "dsh-plugin",
     "deepseek-harness",
     "relay",
-    "reasoning-effort"
+    "reasoning-effort",
+    "vision",
+    "multimodal"
   ],
   "dsh": {
     "bundle": {

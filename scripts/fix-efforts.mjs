@@ -19,9 +19,35 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { pathToFileURL } from 'node:url'
 
-const YAML_URL = 'file:///C:/Users/asus/.dsh/profiles/desktop/node_modules/js-yaml/dist/js-yaml.mjs'
-const yamlModule = await import(YAML_URL)
+/**
+ * js-yaml 向 DSH 的 profile 借 —— 本仓库不带依赖，所以位置得自己找。
+ * 不再写死某个用户名：先看 DSH_JS_YAML，再扫 ~/.dsh/profiles 下每个 profile 的 node_modules。
+ */
+const YAML_CANDIDATES = [
+  process.env.DSH_JS_YAML,
+  ...profileJsYamlPaths()
+]
+
+/** 各 profile 下 js-yaml 的默认位置。 */
+function profileJsYamlPaths () {
+  const profiles = path.join(os.homedir(), '.dsh', 'profiles')
+  if (!fs.existsSync(profiles)) return []
+  return fs.readdirSync(profiles)
+    .map(name => path.join(profiles, name, 'node_modules', 'js-yaml', 'dist', 'js-yaml.mjs'))
+}
+
+const yamlPath = YAML_CANDIDATES.find(candidate =>
+  typeof candidate === 'string' && candidate !== '' && fs.existsSync(candidate))
+
+if (yamlPath === undefined) {
+  console.error('找不到 js-yaml。用 DSH_JS_YAML 指路，例如：')
+  console.error('  set DSH_JS_YAML=%USERPROFILE%\\.dsh\\profiles\\desktop\\node_modules\\js-yaml\\dist\\js-yaml.mjs')
+  process.exit(1)
+}
+
+const yamlModule = await import(pathToFileURL(yamlPath).href)
 const yaml = yamlModule.default ?? yamlModule
 
 const { suggestEfforts } = await import('../lib/index.js')

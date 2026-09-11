@@ -15,11 +15,12 @@ const NS = 'llm-pi-ai'
 const BASE_PATH = '/api/relay-toolkit'
 
 /** 造一个用户层/解析层配置都一致的场景。 */
-function makeState ({ userProviders, resolvedProviders }) {
+function makeState ({ userProviders, resolvedProviders, defaultModel }) {
   return {
     revision: 7,
     user: { providers: userProviders },
     resolved: { providers: resolvedProviders ?? userProviders },
+    defaultModel,
     updates: []
   }
 }
@@ -35,7 +36,11 @@ function makeHost (state, options = {}) {
     }
   }
   const settings = {
-    get: ns => (ns === NS ? state.resolved : undefined),
+    get: ns => {
+      if (ns === NS) return state.resolved
+      if (ns === 'agent-default-model') return state.defaultModel
+      return undefined
+    },
     describe: () => [{ ns: NS, user: state.user, revision: state.revision }],
     update: async (ns, patch, revision) => {
       state.updates.push({ ns, patch, revision })
@@ -512,4 +517,177 @@ test('短别名 k3 归一化成 kimi-k3，档位与容量都按官方 id 取', a
   const fill = align.payload.value.fills.find(item => item.id === 'k3')
   assert.equal(fill.contextWindow, 1000000, '容量也按 kimi-k3 的官方规格')
   assert.equal(fill.maxTokens, 1048576)
+})
+
+test('status 把「官方不支持档位」和「认不出家族」分开报', async () => {
+  const state = makeState({
+    userProviders: {
+      gm: {
+        api: 'openai-completions',
+        baseURL: 'https://relay.example/v1',
+        models: [
+          { id: 'glm-5.1', name: 'glm-5.1' },
+          { id: 'totally-unknown-model', name: 'totally-unknown-model' }
+        ]
+      }
+    }
+  })
+  const host = makeHost(state)
+  apply(host.ctx)
+
+  const { payload } = await callRoute(host, { endpoint: '/status' })
+  const route = payload.value.routes.find(item => item.route === 'gm')
+
+  const unsupported = route.models.find(model => model.id === 'glm-5.1')
+  assert.equal(unsupported.suggested, null, '官方不支持档位的模型不给建议')
+  assert.match(unsupported.unsupported ?? '', /不支持/, '要说明是官方不支持，而不是认不出')
+
+  const unknown = route.models.find(model => model.id === 'totally-unknown-model')
+  assert.equal(unknown.suggested, null)
+  assert.equal(unknown.unsupported, null, '真正认不出的模型不该被说成官方不支持')
+})
+
+test('通用模板也不会写进官方不支持档位的模型', async () => {
+  const state = makeState({
+    userProviders: {
+      gm: {
+        api: 'openai-completions',
+        baseURL: 'https://relay.example/v1',
+        models: [
+          { id: 'glm-5.1', name: 'glm-5.1' },
+          { id: 'kimi-k2.7-code', name: 'kimi-k2.7-code' },
+          { id: 'totally-unknown-model', name: 'totally-unknown-model' }
+        ]
+      }
+    }
+  })
+  const host = makeHost(state)
+  apply(host.ctx)
+
+  const { payload } = await callRoute(host, {
+    method: 'POST',
+    endpoint: '/autofill',
+    body: { route: 'gm', includeUnknown: true }
+  })
+  assert.equal(payload.ok, true)
+  assert.deepEqual(payload.value.fills.map(item => item.id), ['totally-unknown-model'],
+    '只有真正认不出家族的模型才用通用模板')
+
+  const models = state.updates[0].patch.providers.gm.models
+  assert.equal(models.find(model => model.id === 'glm-5.1').reasoningEfforts, undefined,
+    '官方不支持档位的模型不得被写入')
+  assert.equal(models.find(model => model.id === 'kimi-k2.7-code').reasoningEfforts, undefined,
+    '同上：Kimi K2.7-code 只有 thinking 开关')
+  assert.deepEqual(
+    models.find(model => model.id === 'totally-unknown-model').reasoningEfforts,
+    { off: null, low: 'low', medium: 'medium', high: 'high' },
+    '认不出家族的才写通用模板'
+  )
+})
+
+test('status 报告输入模态声明与官方图像能力', async () => {
+  const state = makeState({
+    userProviders: {
+      gm: {
+        api: 'openai-completions',
+        baseURL: 'https://relay.example/v1',
+        models: [
+          { id: 'deepseek-v4.1-flash', name: 'deepseek-v4.1-flash' },
+          { id: 'glm-5.2', name: 'glm-5.2', input: ['text'] },
+          { id: 'totally-unknown-model', name: 'totally-unknown-model' }
+        ]
+      }
+    }
+  })
+  const host = makeHost(state)
+  apply(host.ctx)
+
+  const { payload } = await callRoute(host, { endpoint: '/status' })
+  const route = payload.value.routes.find(item => item.route === 'gm')
+
+  const vision = route.models.find(item => item.id === 'deepseek-v4.1-flash')
+  assert.equal(vision.inputDeclared, false, '没写 input 就是未声明')
+  assert.match(vision.vision ?? '', /Vision/, '官方确认支持图像的给出建议来源')
+
+  const declared = route.models.find(item => item.id === 'glm-5.2')
+  assert.equal(declared.inputDeclared, true, '只声明 text 也算已声明')
+  assert.equal(declared.declaresImage, false, '只声明 text 不等于能收图')
+
+  const unknown = route.models.find(item => item.id === 'totally-unknown-model')
+  assert.equal(unknown.vision, null, '认不出官方能力的模型不给建议')
+})
+
+test('modalities 只给官方确认且未声明的模型补 input', async () => {
+  const state = makeState({
+    userProviders: {
+      gm: {
+        api: 'openai-completions',
+        baseURL: 'https://relay.example/v1',
+        models: [
+          { id: 'deepseek-v4.1-flash', name: 'deepseek-v4.1-flash' },
+          { id: 'glm-5.2', name: 'glm-5.2', input: ['text'] },
+          { id: 'totally-unknown-model', name: 'totally-unknown-model' }
+        ]
+      }
+    }
+  })
+  const host = makeHost(state)
+  apply(host.ctx)
+
+  const { payload } = await callRoute(host, { method: 'POST', endpoint: '/modalities', body: { route: 'gm' } })
+  assert.equal(payload.ok, true)
+  assert.deepEqual(payload.value.fills.map(item => item.id), ['deepseek-v4.1-flash'])
+  assert.deepEqual(payload.value.fills[0].input, ['text', 'image'])
+  assert.match(payload.value.fills[0].source, /Vision/)
+
+  assert.equal(state.updates.length, 1)
+  const models = state.updates[0].patch.providers.gm.models
+  assert.deepEqual(models.find(model => model.id === 'deepseek-v4.1-flash').input, ['text', 'image'])
+  assert.deepEqual(models.find(model => model.id === 'glm-5.2').input, ['text'],
+    '已声明的 input 绝不被改写')
+  assert.equal(models.find(model => model.id === 'totally-unknown-model').input, undefined,
+    '认不出官方能力的模型不得写入')
+  assert.equal(state.updates[0].revision, 7, '写入必须带上读取时的 revision')
+})
+
+test('status 诊断默认模型缺图像声明', async () => {
+  const state = makeState({
+    userProviders: {
+      relay: {
+        api: 'openai-completions',
+        baseURL: 'https://relay.example/v1',
+        models: [{ id: 'deepseek-v4.1-flash', name: 'deepseek-v4.1-flash' }]
+      }
+    },
+    defaultModel: { provider: 'relay', model: 'deepseek-v4.1-flash' }
+  })
+  const host = makeHost(state)
+  apply(host.ctx)
+
+  const { payload } = await callRoute(host, { endpoint: '/status' })
+  const info = payload.value.defaultModel
+  assert.equal(info.provider, 'relay')
+  assert.equal(info.model, 'deepseek-v4.1-flash')
+  assert.equal(info.resolved, true)
+  assert.equal(info.declaresImage, false, '没声明 input，工具层就读不到图像能力')
+  assert.equal(info.inUserLayer, true, '在用户层，插件可以替它补')
+  assert.equal(info.visionCapable, true, '官方确认它支持图像')
+})
+
+test('默认模型已声明图像时诊断不再报缺口', async () => {
+  const state = makeState({
+    userProviders: {
+      relay: {
+        api: 'openai-completions',
+        baseURL: 'https://relay.example/v1',
+        models: [{ id: 'deepseek-v4.1-flash', name: 'deepseek-v4.1-flash', input: ['text', 'image'] }]
+      }
+    },
+    defaultModel: { provider: 'relay', model: 'deepseek-v4.1-flash' }
+  })
+  const host = makeHost(state)
+  apply(host.ctx)
+
+  const { payload } = await callRoute(host, { endpoint: '/status' })
+  assert.equal(payload.value.defaultModel.declaresImage, true)
 })
