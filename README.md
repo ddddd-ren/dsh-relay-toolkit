@@ -1,10 +1,11 @@
 # dsh-relay-toolkit
 
 给 **DeepSeek Harness（DSH）** 用的中转站维护插件：把中转站 `/models` 里缺失的模型合并进
-`llm-pi-ai` 路由，并给缺少 `reasoningEfforts` 声明的模型补上思考等级。
+`llm-pi-ai` 路由，给缺少 `reasoningEfforts` 声明的模型补上思考等级，并把上下文窗口与最大
+输出上限对齐到官方目录（或上游）给出的数值。
 
-设置页会多出一个「中转站工具」区块，每条路由一张卡片，两个按钮：**同步模型**、
-**补全思考等级**。
+设置页会多出一个「中转站工具」区块，每条路由一张卡片，四个按钮：**同步模型**、
+**补全思考等级**、**用通用模板补全**、**对齐窗口与输出**。
 
 ## 明确不做的事
 
@@ -58,6 +59,17 @@ dsh plugin --profile desktop remove dsh-relay-toolkit
 - **用通用模板补全（N）**：仅当存在「认不出家族」的模型时出现。写的是通用模板
   `off: null / low / medium / high`；上游是否支持这套拼写无法预先确认，所以它**必须由你点**，
   永远不参与自动补全。补完的模型会在结果里标为"用了通用模板"。
+- **对齐窗口与输出（N）**：调用 DSH 自己的模型发现（`ctx.llm.discoverModels('llm-pi-ai', …)`），
+  把 `contextWindow` 与 `maxTokens` 写进用户层里**还没声明这两项**的模型。数值优先来自 pi-ai
+  的已装目录，目录里没有才回到上游 `/models`（那里已兼容 `context_length`、`max_input_tokens`、
+  `limit.context`、`max_output_tokens`、`top_provider.max_completion_tokens` 等拼写）。
+
+  为什么值得做：模型条目缺这两项时，DSH 会退回路由级的 `defaultContextWindow` /
+  `defaultMaxTokens`，上下文预算与溢出判定都会按那个默认值算。对齐后按真实容量计算。
+
+  两点设计取舍：**插件自己不带任何规格数字** —— 数值全部来自 DSH 的发现结果（官方目录或
+  上游），所以不会像硬编码的规格表那样随模型更新而过期；**已经填好的数值一律不覆盖**，
+  只填空缺。
 
 ## 兼容性
 
@@ -69,6 +81,8 @@ dsh plugin --profile desktop remove dsh-relay-toolkit
   没有 web 服务的组合也能正常加载；
 - `settings.get(ns)` / `settings.describe()` / `settings.update(ns, patch, revision)`；
 - `credentials.resolve(ref)` → `{ value }`；
+- `llm.discoverModels(settingsNs, { provider })` → `[{ id, name, contextWindow?, maxTokens? }]`
+  —— 窗口/输出上限的对齐来源：provider 命中已装目录时直接返回目录数值，否则查上游；
 - 客户端：`ctx.slots.inject('settings.section', () => ctx.slots.register({...}, Component))`；
 - 客户端 bundle 只 `require('react')` 与 `react/jsx-runtime`（平台播种表内），
   因此不需要 `dsh.client.external` 声明。
@@ -79,13 +93,14 @@ dsh plugin --profile desktop remove dsh-relay-toolkit
 `__ModuleLoader__` bundle）都是可直接运行的产物。
 
 ```sh
-node --test test/host.test.mjs test/client.test.mjs   # 17 项
+node --test test/host.test.mjs test/client.test.mjs   # 22 项
 node test/cordis-smoke.mjs                            # 真实 cordis 冒烟
 ```
 
 - `test/host.test.mjs`：mock cordis 上下文与假 `/models` 响应，端到端驱动宿主逻辑 ——
   视图构建、只补缺失、已有声明原样保留、底座层路由拒绝写入、同步追加与凭据使用、
-  上游报错不写入、非本机拒绝、未知端点、无 web 服务时仍可加载。
+  上游报错不写入、非本机拒绝、未知端点、无 web 服务时仍可加载；对齐部分另外覆盖
+  发现结果驱动写入、已有容量不被覆盖、发现失败只记原因不写入、缺 `llm` 服务时报可读原因。
 - `test/client.test.mjs`：执行 `lib/client.js`，验证 bundle 契约（以包名注册、
   只依赖平台播种表内的 react）与 `settings.section` 的注册形状。
 - `test/cordis-smoke.mjs`：用**真实的 `@deepseek-ai/cordis`** 加载本插件，确认嵌套

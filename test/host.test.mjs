@@ -60,6 +60,7 @@ function makeHost (state, options = {}) {
       if (serviceName === 'logger') return ctx.logger
       if (serviceName === 'settings') return settings
       if (serviceName === 'credentials') return credentials
+      if (serviceName === 'llm') return options.llm
       if (serviceName === (options.serveVia ?? 'webServer')) return webServer
       return undefined
     },
@@ -363,4 +364,80 @@ test('autofill 只在 includeUnknown 下才对认不出家族的模型写通用�
     { off: null, low: 'low', high: 'high' },
     '已有声明依旧原样保留'
   )
+})
+
+test('align 用 DSH 的模型发现补上未声明的窗口与输出上限', async () => {
+  const state = makeState({ userProviders: structuredClone(SAMPLE_USER) })
+  const calls = []
+  const llm = {
+    discoverModels: async (ns, request) => {
+      calls.push({ ns, provider: request.provider })
+      return [
+        { id: 'glm-5.1', name: 'glm-5.1', contextWindow: 200000, maxTokens: 128000 },
+        { id: 'glm-5.2', name: 'glm-5.2', contextWindow: 200000, maxTokens: 128000 },
+        { id: 'totally-unknown-model', name: 'totally-unknown-model' }
+      ]
+    }
+  }
+  const host = makeHost(state, { llm })
+  apply(host.ctx)
+
+  const { payload } = await callRoute(host, { method: 'POST', endpoint: '/align', body: { route: 'gm' } })
+  assert.equal(payload.ok, true)
+  assert.deepEqual(calls, [{ ns: 'llm-pi-ai', provider: 'gm' }], '每条路由只做一次发现')
+
+  assert.deepEqual(payload.value.fills.map(item => item.id), ['glm-5.1', 'glm-5.2'])
+  assert.ok(payload.value.skipped.some(item => item.id === 'totally-unknown-model'),
+    '发现结果没给出容量数值的模型要跳过并说明')
+
+  const models = state.updates[0].patch.providers.gm.models
+  const aligned = models.find(model => model.id === 'glm-5.1')
+  assert.equal(aligned.contextWindow, 200000)
+  assert.equal(aligned.maxTokens, 128000)
+  assert.deepEqual(aligned.reasoningEfforts, { off: null, low: 'low', high: 'high' },
+    '对齐容量不得动已有的思考等级声明')
+  assert.equal(state.updates[0].revision, 7, '写入要带上读取时的 revision')
+})
+
+test('align 不覆盖用户已经填好的窗口与输出数值', async () => {
+  const state = makeState({
+    userProviders: {
+      gm: {
+        api: 'openai-completions',
+        baseURL: 'https://relay.example/v1',
+        models: [{ id: 'glm-5.1', name: 'glm-5.1', contextWindow: 128000, maxTokens: 8192 }]
+      }
+    }
+  })
+  const llm = { discoverModels: async () => [{ id: 'glm-5.1', contextWindow: 200000, maxTokens: 128000 }] }
+  const host = makeHost(state, { llm })
+  apply(host.ctx)
+
+  const { payload } = await callRoute(host, { method: 'POST', endpoint: '/align', body: { route: 'gm' } })
+  assert.equal(payload.ok, true)
+  assert.deepEqual(payload.value.fills, [], '两个字段都已声明，没有可补的')
+  assert.equal(state.updates.length, 0, '不得写回')
+})
+
+test('align 在发现失败时记录原因且不写入', async () => {
+  const state = makeState({ userProviders: structuredClone(SAMPLE_USER) })
+  const llm = { discoverModels: async () => { throw new Error('上游不可达') } }
+  const host = makeHost(state, { llm })
+  apply(host.ctx)
+
+  const { payload } = await callRoute(host, { method: 'POST', endpoint: '/align', body: {} })
+  assert.equal(payload.ok, true)
+  assert.deepEqual(payload.value.fills, [])
+  assert.ok(payload.value.skipped.some(item => item.reason === '上游不可达'))
+  assert.equal(state.updates.length, 0)
+})
+
+test('align 在宿主没有 llm 服务时给出可读原因', async () => {
+  const state = makeState({ userProviders: structuredClone(SAMPLE_USER) })
+  const host = makeHost(state)
+  apply(host.ctx)
+
+  const { payload } = await callRoute(host, { method: 'POST', endpoint: '/align', body: { route: 'gm' } })
+  assert.equal(payload.ok, true)
+  assert.ok(payload.value.skipped.some(item => /discoverModels/.test(item.reason ?? '')))
 })
