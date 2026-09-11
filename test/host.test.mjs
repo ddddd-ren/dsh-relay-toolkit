@@ -9,7 +9,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
-import { apply, name, inject } from '../lib/index.js'
+import { apply, name, inject, noEffortReason, suggestEfforts } from '../lib/index.js'
 
 const NS = 'llm-pi-ai'
 const BASE_PATH = '/api/relay-toolkit'
@@ -690,4 +690,24 @@ test('默认模型已声明图像时诊断不再报缺口', async () => {
 
   const { payload } = await callRoute(host, { endpoint: '/status' })
   assert.equal(payload.value.defaultModel.declaresImage, true)
+})
+
+test('noEffortReason 与 suggestEfforts 严格互斥', () => {
+  // 官方明确不支持档位的家族 → 给出原因，scripts/fix-efforts.mjs 据此删除声明。
+  assert.match(noEffortReason('glm-5.1') ?? '', /不支持/)
+  assert.match(noEffortReason('kimi-k2.7-code') ?? '', /不支持/)
+  assert.match(noEffortReason('MiniMax-M3') ?? '', /档位/)
+  assert.match(noEffortReason('qwen3.7-max') ?? '', /未公布/)
+  assert.match(noEffortReason('hy4-preview') ?? '', /未公布/)
+
+  // 真正认不出家族的 → 两边都没有答案；脚本据此「原样不动」，不替用户做决定。
+  assert.equal(noEffortReason('totally-unknown-model'), undefined)
+  assert.equal(suggestEfforts('totally-unknown-model'), undefined)
+
+  // 互斥：能给官方档位建议的模型，绝不能同时被判成「不支持档位」。
+  // 这是子串匹配的坑 —— 表里的 `glm-5` 会命中 glm-5.2 / glm-5.3，而它们都有官方档位。
+  for (const id of ['glm-5.2', 'glm-5.3', 'kimi-k3', 'deepseek-v4.1-flash', 'hy3']) {
+    assert.notEqual(suggestEfforts(id), undefined, id + ' 应该有官方档位')
+    assert.equal(noEffortReason(id), undefined, id + ' 不该被判成不支持档位')
+  }
 })

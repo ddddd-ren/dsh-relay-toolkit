@@ -6,7 +6,8 @@
  *   - 官方确认支持 `reasoning_effort` 的模型 → 写成官方档位集合；
  *   - 官方确认不支持、或官方未公布档位枚举的模型 → **删除**声明。留着是有害的：
  *     DSH 会把无效档位显示给用户，选中就真发 `reasoning_effort`，上游会报错或静默忽略；
- *   - 插件认不出家族的模型 → 原样不动。
+ *   - 插件认不出家族的模型 → **原样不动**（那可能是你自己知道、而官方表里没有的模型，
+ *     删掉等于替你做了决定）。判定用插件的 `noEffortReason()`，与插件同一套规则。
  *
  * 用法（默认目标是 ~/.dsh/settings.yaml）：
  *   node scripts/fix-efforts.mjs --dry-run          # 只看会改什么，不写文件
@@ -50,7 +51,7 @@ if (yamlPath === undefined) {
 const yamlModule = await import(pathToFileURL(yamlPath).href)
 const yaml = yamlModule.default ?? yamlModule
 
-const { suggestEfforts } = await import('../lib/index.js')
+const { suggestEfforts, noEffortReason } = await import('../lib/index.js')
 
 const args = process.argv.slice(2)
 const dryRun = args.includes('--dry-run')
@@ -66,6 +67,7 @@ if (providers === undefined) {
 const updated = []
 const removed = []
 const kept = []
+const untouched = []
 
 for (const [route, profile] of Object.entries(providers)) {
   if (!Array.isArray(profile?.models)) continue
@@ -75,6 +77,11 @@ for (const [route, profile] of Object.entries(providers)) {
     const suggested = suggestEfforts(model.id)
 
     if (suggested === undefined) {
+      // 只有官方明确「不支持档位」的才删；认不出家族的原样不动。
+      if (noEffortReason(model.id) === undefined) {
+        if (current !== undefined) untouched.push({ route, id: model.id })
+        continue
+      }
       if (current !== undefined) {
         delete model.reasoningEfforts
         removed.push({ route, id: model.id, before: current })
@@ -91,7 +98,8 @@ for (const [route, profile] of Object.entries(providers)) {
 }
 
 console.log('改 ' + String(updated.length) + ' 个、删 ' + String(removed.length)
-  + ' 个、已符合官方 ' + String(kept.length) + ' 个')
+  + ' 个、已符合官方 ' + String(kept.length) + ' 个'
+  + (untouched.length > 0 ? '、认不出家族保持不动 ' + String(untouched.length) + ' 个' : ''))
 
 for (const item of updated) {
   console.log('  [改] ' + item.route + '/' + item.id)
@@ -99,6 +107,9 @@ for (const item of updated) {
 }
 for (const item of removed) {
   console.log('  [删] ' + item.route + '/' + item.id + '   （官方不支持 reasoning_effort，或未公布档位）')
+}
+for (const item of untouched) {
+  console.log('  [留] ' + item.route + '/' + item.id + '   （官方表里认不出这个家族，原样不动）')
 }
 
 if (dryRun) {
