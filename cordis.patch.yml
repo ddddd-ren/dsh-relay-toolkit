@@ -1,0 +1,5 @@
+# dsh-relay-toolkit —— 只挂载宿主半侧：中转站 /models 同步 + 思考等级补全。
+# 浏览器半侧（设置页的“中转站工具”区块）由 package.json 的 dsh.client 声明发现。
+- insert:
+    - id: relay-toolkit
+      name: dsh-relay-toolkit
