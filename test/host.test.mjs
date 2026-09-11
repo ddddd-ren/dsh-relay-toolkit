@@ -419,25 +419,56 @@ test('align 不覆盖用户已经填好的窗口与输出数值', async () => {
   assert.equal(state.updates.length, 0, '不得写回')
 })
 
-test('align 在发现失败时记录原因且不写入', async () => {
+test('align 在发现失败时用内置规格表兜底，并把失败原因带回', async () => {
   const state = makeState({ userProviders: structuredClone(SAMPLE_USER) })
   const llm = { discoverModels: async () => { throw new Error('上游不可达') } }
   const host = makeHost(state, { llm })
   apply(host.ctx)
 
-  const { payload } = await callRoute(host, { method: 'POST', endpoint: '/align', body: {} })
+  const { payload } = await callRoute(host, { method: 'POST', endpoint: '/align', body: { route: 'gm' } })
   assert.equal(payload.ok, true)
-  assert.deepEqual(payload.value.fills, [])
-  assert.ok(payload.value.skipped.some(item => item.reason === '上游不可达'))
-  assert.equal(state.updates.length, 0)
+  assert.deepEqual(payload.value.discoveryErrors, [{ route: 'gm', reason: '上游不可达' }])
+
+  const fills = payload.value.fills
+  assert.deepEqual(fills.map(item => item.id), ['glm-5.1', 'glm-5.2'], '内置规格表补上了官方值')
+  assert.ok(fills.every(item => item.source === 'spec'))
+  assert.equal(fills[0].contextWindow, 200000, 'glm-5.1 官方 200K')
+  assert.equal(fills[1].contextWindow, 1000000, 'glm-5.2 官方 1M')
+  assert.equal(fills[1].maxTokens, 128000)
+  assert.ok(payload.value.skipped.some(item => /规格表也认不出/.test(item.reason ?? '')))
 })
 
-test('align 在宿主没有 llm 服务时给出可读原因', async () => {
+test('align 在宿主没有 llm 服务时同样走内置规格表', async () => {
   const state = makeState({ userProviders: structuredClone(SAMPLE_USER) })
   const host = makeHost(state)
   apply(host.ctx)
 
   const { payload } = await callRoute(host, { method: 'POST', endpoint: '/align', body: { route: 'gm' } })
   assert.equal(payload.ok, true)
-  assert.ok(payload.value.skipped.some(item => /discoverModels/.test(item.reason ?? '')))
+  assert.ok(payload.value.discoveryErrors.some(item => /discoverModels/.test(item.reason ?? '')))
+  assert.ok(payload.value.fills.length > 0, '规格表仍能补上数值')
+  assert.ok(payload.value.fills.every(item => item.source === 'spec'))
+})
+
+test('align 优先用发现结果，规格表只补它没给的项', async () => {
+  const state = makeState({
+    userProviders: {
+      gm: {
+        api: 'openai-completions',
+        baseURL: 'https://relay.example/v1',
+        models: [{ id: 'glm-5.2', name: 'glm-5.2' }]
+      }
+    }
+  })
+  // 上游只给了 contextWindow（且与官方规格表不同），没给 maxTokens
+  const llm = { discoverModels: async () => [{ id: 'glm-5.2', contextWindow: 524288 }] }
+  const host = makeHost(state, { llm })
+  apply(host.ctx)
+
+  const { payload } = await callRoute(host, { method: 'POST', endpoint: '/align', body: { route: 'gm' } })
+  const fill = payload.value.fills[0]
+  assert.equal(fill.contextWindow, 524288, '窗口以上游发现为准，不被规格表覆盖')
+  assert.equal(fill.maxTokens, 128000, '输出上限上游没给，用规格表补')
+  assert.equal(fill.source, 'spec', '只要有一项来自规格表就标注来源')
+  assert.equal(fill.specSource, '智谱官方文档')
 })
