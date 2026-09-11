@@ -101,54 +101,94 @@ K3 官方注明：输入长度 + `max_completion_tokens` 超出窗口会返回 `
 
 ## 阿里 Qwen（官方文档 help.aliyun.com）
 
-来源：<https://help.aliyun.com/zh/model-studio/text-generation-model>
+来源：<https://help.aliyun.com/zh/model-studio/text-generation-model>、
+<https://www.alibabacloud.com/help/tc/model-studio/qwen3-8-max>
 
-| 模型 | 上下文 | 状态 |
-|---|---|---|
-| `qwen3.8-max` | **1M** | 推荐（最强推理），快照 `qwen3.8-max-0902` |
-| `qwen3.8-flash` | **1M** | 推荐（轻量低成本） |
-| `qwen3.7-plus` | **1M** | 推荐（能力成本均衡，Agent 首选） |
-| `qwen3.7-max` | **1M** | **旧版模型**（不再首选推荐），快照 `qwen3.7-max-2026-06-08` 等 |
+| 模型 | 上下文 | 最大输出 | 思考等级 |
+|---|---|---|---|
+| `qwen3.8-max` | **1M** | **131,072** | `reasoning_effort` = `low`/`medium`/`xhigh`（默认 `xhigh`）；`max`→xhigh、`high`→xhigh、`minimal`→low；不可与 `thinking_budget` 同传 |
+| `qwen3.8-flash` | **1M** | **131,072** | `reasoning_effort` = `xhigh`（默认）/`medium`/`low`；`max`/`high`→xhigh |
+| `qwen3.7-plus` | **1M** | **131,072** | 混合模式默认开启，`thinking_budget` 控制深度（官方档位表未覆盖 3.7 系列） |
+| `qwen3.7-max` | **1M** | **131,072** | 同上；已被阿里列为**旧版模型**，快照 `qwen3.7-max-2026-06-08` 等 |
 
-所有 Qwen3 及以上模型均支持思考模式，通过 `enable_thinking` 开启（Responses API 用
-`reasoning.effort` 控制开关与深度）。**最大输出该页未给。**
+补充：3.7 系列最大输入 991,808（思考模式 983,616），最大思维链 262,144。
+**官方冲突**：QwenCloud 总表把 3.7 系列最大输出记作 64k，与百炼的 131,072 不一致，原样并列。
 
-同页第三方模型（阿里云转售）的上下文：`glm-5.1` 198k、`MiniMax-M3` 192k、
-`MiniMax-M2.7` 192k、`kimi-k2.7-code` 256k、`deepseek-v4-pro`/`deepseek-v4-flash` 1M、
-`mimo-v2.5-pro` **1M**。
+同页第三方模型（阿里云转售）上下文：`glm-5.1` 198k、`MiniMax-M3` 192k、`MiniMax-M2.7` 192k、
+`kimi-k2.7-code` 256k、`deepseek-v4-pro`/`deepseek-v4-flash` 1M、`mimo-v2.5-pro` 1M。
 
 ---
 
 ## MiniMax（官方文档 platform.minimaxi.com）
 
-来源：<https://platform.minimaxi.com/docs/guides/text-generation>
+来源：<https://platform.minimaxi.com/docs/guides/text-generation>、
+<https://platform.minimax.io/docs/api-reference/text/api/openapi-chat-openai.json>
 
-| 模型 | 上下文窗口 | 说明 |
-|---|---|---|
-| `MiniMax-M3` | **1,000,000** | 最新旗舰，原生多模态，输出约 100+ TPS |
-| `MiniMax-M2.7` | **204,800** | 输出约 60 TPS |
-| `MiniMax-M2.7-highspeed` | **204,800** | M2.7 极速版（官方明示：效果不变、更快） |
-| `MiniMax-M2.5` / `M2.5-highspeed` | 204,800 | |
-| `MiniMax-M2.1` | 204,800 | |
-| `M2-her` | 64K | 对话/角色扮演 |
+| 模型 | 上下文窗口 | 最大输出 | 思考控制 |
+|---|---|---|---|
+| `MiniMax-M3` | **1,000,000** | 官方模型页未列（schema 归类：推荐 131,072 / 最大 524,288） | `thinking.type` = `adaptive`（默认）/`disabled` |
+| `MiniMax-M2.7` | **204,800** | 官方未逐型号公布（schema 归类 65,536 / 204,800） | 无档位（不能关闭思考） |
+| `MiniMax-M2.7-highspeed` | **204,800** | 同上 | 同上 |
+| `MiniMax-M2.5` / `M2.5-highspeed` | 204,800 | — | — |
+| `MiniMax-M2.1` | 204,800 | — | — |
+| `M2-her` | 64K | — | — |
 
-官方注明 M2.7 及更早为**历史模型，仍正常提供服务**。**最大输出该页未给。**
+官方注明 M2.7 及更早为**历史模型，仍正常提供服务**。**输出上限官方未逐型号点名** —— 本表与
+插件规格表都刻意留空，不拿 schema 归类值或上代型号（M2 的 200k/128k 含 CoT）硬凑。
 
 注意：阿里云百炼上的 `MiniMax-M3` 只给 **192k**，与官方 1,000,000 冲突 —— 转售会加限制。
 
 ---
 
-## 小米 MiMo
+## 小米 MiMo（官方文档 mimo.mi.com）
 
-`mimo-v2.5-pro` 在阿里云百炼官方页列为 **1M 上下文**（来源同 Qwen 章节）。
-`mimo-v2.5`（非 pro）与两者的最大输出**未找到官方数据**，待补。
+来源：<https://mimo.mi.com/docs/zh-CN/quick-start/summary/model>、
+<https://mimo.xiaomi.com/mimo-v2-5-pro>
+
+| 模型 | 上下文窗口 | 最大输出 | 思考控制 |
+|---|---|---|---|
+| `mimo-v2.5` | **1M** | **128K** | 仅开关：`thinking.type` = `enabled`（默认）/`disabled`，无多档 |
+| `mimo-v2.5-pro` | **1M** | **128K** | 同上；思考模式下 `temperature`/`top_p` 不可自定义 |
+
+注意：开源基座 MiMo-V2.5-Base / Pro-Base 是 **256K**，与 API 型号的 1M 不是一回事，别混用。
 
 ---
 
-## 待核对
+## 国外厂商（本轮**未能取得官方数值**）
 
-- 国外：OpenAI、Anthropic、Google、xAI、Meta、Mistral
-- 各家的**最大输出**上限（多家官方页只给上下文，不给输出）
+这一节必须连同限制一起读 —— 本轮核对的网络环境**无法访问绝大多数国外厂商官方站点**：
+
+| 厂商 | 官方域状态 |
+|---|---|
+| OpenAI | `developers.openai.com`、`platform.openai.com`、`openai.com` 全部 **HTTP 403**（Cloudflare 拦截） |
+| Google | `ai.google.dev`、`cloud.google.com`、`deepmind.google` 全部连接失败；`blog.google` 正文被截断 |
+| xAI | `x.ai`、`docs.x.ai` 连接失败 |
+| Meta | `llama.com`、`ai.meta.com`、`huggingface.co` 连接失败 |
+| Mistral | `mistral.ai`、`docs.mistral.ai` 连接失败 |
+| Anthropic | API 文档站被重定向到官网，正文取不到；官网本身可读 |
+
+所以**国外模型的上下文窗口 / 最大输出 / 思考档位，一律标注「未找到官方数据」**，不采信任何
+第三方站点流传的数字（例如 grok-4-fast 的"2M"、Gemini 的"2M"，均无官方佐证）。
+
+唯一可读的间接来源是 **AWS Bedrock model card**（AWS 官方文档，**不是模型厂商官方**），它给出：
+`claude-fable-5-1` / `claude-mythos-5-1` / `claude-opus-5` / `claude-sonnet-5` = 1M 上下文 / 128K 输出；
+`claude-haiku-4-5` = 200K / 64K；`mistral-large-3` = 256K / 32K；`gpt-6-astra` = 1,050,000 / 128,000。
+**这些请当作云平台口径，不是厂商口径。**
+
+### 仍然值得记下的两条结论
+
+1. **Anthropic 命名早已换代**：当前产品线是 Claude **Fable 5.1** / **Mythos 5.1**（2026-09-01）、
+   **Opus 5**（2026-07-24）、**Sonnet 5**（2026-06-30）、**Haiku 4.5**（未换代）。
+   `claude-opus-4.x` / `claude-sonnet-4.x` 那套写法已经过时。注意 Anthropic 官方产品页的
+   `<h1>` 仍写着旧版本号（Opus 4.8 / Sonnet 4.6），只有正文是新版 —— 只看标题会取到错误版本。
+2. **OpenAI 已有更新的旗舰 `gpt-6-astra`**（2026-09-08），且 GPT-5.6 是 **Sol / Terra / Luna
+   三个分档**，不带后缀的 `gpt-5.6` 未见官方模型页。
+
+要补齐国外这块，需要能绕过 Cloudflare/网络封锁的环境，重点核对：
+`developers.openai.com/api/docs/models/compare`、
+`platform.claude.com/docs/en/about-claude/models/overview`、
+`ai.google.dev/gemini-api/docs/models`、`docs.x.ai/docs/models`、
+`docs.mistral.ai/getting-started/models`。
 
 ---
 
