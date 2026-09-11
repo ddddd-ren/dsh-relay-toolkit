@@ -100,7 +100,8 @@ async function callRoute (route, { method = 'GET', endpoint = '', remoteAddress 
   assert.equal(gm.models.find(model => model.id === 'glm-5.1').declared, true)
   assert.deepEqual(
     gm.models.find(model => model.id === 'glm-5.2').suggested,
-    { off: null, low: 'low', medium: 'medium', high: 'high' }
+    { off: 'none', minimal: 'minimal', low: 'low', medium: 'medium', high: 'high', xhigh: 'xhigh', max: 'max' },
+    'GLM-5.2 按官方档位集合给建议'
   )
 
   const refused = await callRoute(route, { endpoint: '/status', remoteAddress: '10.0.0.9' })

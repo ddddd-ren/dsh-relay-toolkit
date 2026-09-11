@@ -174,7 +174,11 @@ test('status 报告可写性、已声明与建议补全的数量', async () => {
 
   const fillable = route.models.find(model => model.id === 'glm-5.2')
   assert.equal(fillable.declared, false)
-  assert.deepEqual(fillable.suggested, { off: null, low: 'low', medium: 'medium', high: 'high' })
+  assert.deepEqual(
+    fillable.suggested,
+    { off: 'none', minimal: 'minimal', low: 'low', medium: 'medium', high: 'high', xhigh: 'xhigh', max: 'max' },
+    'GLM-5.2 官方档位最全'
+  )
 
   const unknown = route.models.find(model => model.id === 'totally-unknown-model')
   assert.equal(unknown.suggested, null, '认不出的家族不给建议')
@@ -204,7 +208,8 @@ test('autofill 只补缺失项，保留已有声明原样，并带 revision 写�
   )
   assert.deepEqual(
     models.find(model => model.id === 'glm-5.2').reasoningEfforts,
-    { off: null, low: 'low', medium: 'medium', high: 'high' }
+    { off: 'none', minimal: 'minimal', low: 'low', medium: 'medium', high: 'high', xhigh: 'xhigh', max: 'max' },
+    'GLM-5.2 按官方档位集合补全'
   )
   assert.equal(
     models.find(model => model.id === 'totally-unknown-model').reasoningEfforts,
@@ -276,8 +281,16 @@ test('sync 只追加缺失模型，并为新模型带上可确认的思考等级
 
   const models = state.updates[0].patch.providers.gm.models
   assert.equal(models.length, 5)
-  assert.deepEqual(models[3].reasoningEfforts, { off: null, low: 'low', medium: 'medium', high: 'high' })
-  assert.deepEqual(models[4].reasoningEfforts, { off: null, low: 'low', high: 'high' })
+  assert.deepEqual(
+    models[3].reasoningEfforts,
+    { low: 'low', high: 'high', max: 'max' },
+    'GLM-5.3 强制思考，官方只有三档'
+  )
+  assert.equal(
+    models[4].reasoningEfforts,
+    undefined,
+    'Kimi K2.7-code 官方不支持 reasoning_effort，不得写入档位'
+  )
   assert.equal(models[3].name, 'glm-5.3', '新模型补上 name')
 })
 
