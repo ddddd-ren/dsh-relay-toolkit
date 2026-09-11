@@ -485,3 +485,31 @@ test('align 优先用发现结果，规格表只补它没给的项', async () =>
   assert.equal(fill.source, 'spec', '只要有一项来自规格表就标注来源')
   assert.equal(fill.specSource, '智谱官方文档')
 })
+
+test('短别名 k3 归一化成 kimi-k3，档位与容量都按官方 id 取', async () => {
+  const state = makeState({
+    userProviders: {
+      gm: {
+        api: 'openai-completions',
+        baseURL: 'https://relay.example/v1',
+        models: [{ id: 'k3', name: 'k3' }]
+      }
+    }
+  })
+  const llm = { discoverModels: async () => [] }
+  const host = makeHost(state, { llm })
+  apply(host.ctx)
+
+  const status = await callRoute(host, { endpoint: '/status' })
+  const route = status.payload.value.routes.find(item => item.route === 'gm')
+  assert.deepEqual(
+    route.models.find(item => item.id === 'k3').suggested,
+    { low: 'low', high: 'high', max: 'max' },
+    'k3 = kimi-k3：强制思考，只有三档、无 off'
+  )
+
+  const align = await callRoute(host, { method: 'POST', endpoint: '/align', body: { route: 'gm' } })
+  const fill = align.payload.value.fills.find(item => item.id === 'k3')
+  assert.equal(fill.contextWindow, 1000000, '容量也按 kimi-k3 的官方规格')
+  assert.equal(fill.maxTokens, 1048576)
+})
