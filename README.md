@@ -104,8 +104,9 @@ dsh plugin --profile desktop remove dsh-relay-toolkit
 
 为什么要分：DSH 会把 `reasoningEfforts` 里的档位显示给用户选，一选就真发
 `reasoning_effort`；对不支持该参数的上游，这是报错或静默忽略。所以
-`glm-5.1`、`kimi-k2.6`、`kimi-k2.7-code`、`mimo-v2.5*`、`MiniMax-M3`、`MiniMax-M2.7*`、
-`qwen3.7-*`、`hy4-preview` 这些模型**一个字段都不写**，无论你点哪个按钮。
+`glm-5.1`、`kimi-k2.6`、`kimi-k2.7-code`、`kimi-for-coding-highspeed`、`mimo-v2.5*`、
+`MiniMax-M3`、`MiniMax-M2.7*`、`qwen3.7-*`、`hy4-preview` 这些模型**一个字段都不写**，
+无论你点哪个按钮。
 
 ### 图像输入声明（多模态）
 
@@ -129,8 +130,8 @@ dsh plugin --profile desktop remove dsh-relay-toolkit
 
 1. 只写 `input`，**不写** `inputModalities`。后者是 DSH 内置适配器（`llm-deepseek`）
    的字段，pi-ai 风格的路由用的是 `input`，写错等于没写；
-2. 只补官方文档确认能收图的模型（`deepseek-flash` / `deepseek-v4.1*`、`glm-5.3-flash`）；
-   国外厂商本轮没有可核对的官方来源，一个都不补；
+2. 只补官方文档确认能收图的模型（`deepseek-flash` / `deepseek-v4.1*`、`glm-5.3-flash`、
+   Kimi Code 的四个 Model ID）；国外厂商本轮没有可核对的官方来源，一个都不补；
 3. **官方能力 ≠ 中转站能力**。声明只代表模型本身能收图，你的中转站是否真的向上游透传
    图像**必须自己实测**。所以这一步**必须由你点**，
    不参与自动补全 —— 写错了的表现是请求被上游拒绝，而不是静默降级。
@@ -225,9 +226,13 @@ dsh plugin --profile desktop add file:C:/Users/<你>/dsh-plugins/dsh-relay-toolk
 
 - 「未识别家族」的模型不会被补全，需要你自己在 settings.yaml 里手写 `reasoningEfforts`
   （合法等级键见上表）。官方确认不支持档位的模型同理，但那是**刻意不写**，不建议手写。
-- **短别名只在精确匹配时归一化**：目前只有 `k3` → `kimi-k3` 一条。别名只用于查表，
-  写回配置的仍是中转站给的原 id。之所以不做子串匹配，是因为 `k3` 这种短别名当子串用
+- **短别名只在精确匹配时归一化**：目前只有 `k3` → `kimi-k3` 一条 —— 它们是同一个模型
+  在两处官方入口下的名字（Kimi Code 用 `k3`，API 开放平台用 `kimi-k3`）。别名只用于查表，
+  写回配置的仍是中转站给的原 id。之所以不做子串匹配，是因为 `k3` 这种短 id 当子串用
   会误伤任何含 `k3` 的模型 id。
+- **规则表是子串匹配 + 最长命中优先**：`kimi-for-coding` 是 `kimi-for-coding-highspeed`
+  的前缀，前者有三档、后者只有 Thinking 开关，全靠最长命中区分开。改动那张表时要保住
+  这个性质，否则会给高速版错误地补上档位。
 - 中转站 `/models` 若返回非 `{ data: [...] }` 结构会报错并保持配置不变。
 - 中转站返回的模型 id 会原样写入；若你的中转站把渠道前缀写进 id（如 `openai/gpt-5.5`），
   同步进来的也就是那个 id。

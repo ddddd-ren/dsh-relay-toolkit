@@ -1,6 +1,6 @@
 # 模型规格核对表
 
-> 核对日期：2026-09-11
+> 核对日期：2026-09-11（2026-09-13 补充 Kimi Code 的 4 个 Model ID）
 > 方法：只采信厂商官方来源（官方 API 文档、官方发布公告、云厂商官方模型表）；每个数值附来源 URL。
 > 查不到官方数值的一律标注「未找到官方数据」，不按模型名推测。
 >
@@ -73,13 +73,51 @@
 
 ---
 
-## 月之暗面 Kimi（官方文档 platform.kimi.com）
+## 月之暗面 Kimi
 
-| 模型 | 上下文窗口 | 最大输出 | 思考控制 | 来源 |
+Kimi 有**两个入口，model id 不同**，别混用：
+
+- **API 开放平台**（`platform.kimi.com`，按量计费）：`kimi-k3`、`kimi-k2.7-code`、`kimi-k2.6`
+- **Kimi Code**（`kimi.com/code`，订阅制，Base URL `https://api.kimi.com/coding/v1`）：
+  `k3`、`k3-256k`、`kimi-for-coding`、`kimi-for-coding-highspeed`
+
+来源：<https://platform.kimi.com/docs/api/models-overview>、
+<https://www.kimi.com/code/docs/kimi-code/models.html>
+
+### API 开放平台
+
+| 模型 | 上下文窗口 | 最大输出 | 思考控制 |
+|---|---|---|---|
+| `kimi-k3` | **1M** | `max_completion_tokens` 默认 131072，**最大 1048576** | `reasoning_effort`: `low`/`high`/`max`（默认 `max`）；始终思考、不可关闭 |
+| `kimi-k2.7-code` | **256K** | 官方只给默认值 **32768**，未公布上限 | `thinking` 仅接受 `{"type":"enabled","keep":"all"}`；**不支持** `reasoning_effort` |
+| `kimi-k2.6` | **256K** | 官方只给默认值 **32768**，未公布上限 | `thinking` 支持 `enabled`（默认）/`disabled`/`enabled`+`keep:"all"`；不支持 `reasoning_effort` |
+
+### Kimi Code（订阅制）
+
+2026-09-11 起 `kimi-for-coding` 已由 **K2.8 Preview** 接管，且**Model ID 保持不变** ——
+也就是说这个 id 的规格会随产品升级而变，插件里的数值必须按核对日期复查。
+
+| Model ID | 版本 | 上下文窗口 | 思考程度 | 多模态输入 |
 |---|---|---|---|---|
-| `kimi-k3` | **1M** | `max_completion_tokens` 默认 131072，**最大 1048576** | `reasoning_effort`: `low`/`high`/`max`（默认 `max`）；始终思考、不可关闭 | <https://platform.kimi.com/docs/api/models-overview> |
-| `kimi-k2.7-code` | **256K** | 官方只给默认值 **32768**，未公布上限 | `thinking` 仅接受 `{"type":"enabled","keep":"all"}`；**不支持** `reasoning_effort` | 同上 |
-| `kimi-k2.6` | **256K** | 官方只给默认值 **32768**，未公布上限 | `thinking` 支持 `enabled`（默认）/`disabled`/`enabled`+`keep:"all"`；不支持 `reasoning_effort` | 同上 |
+| `k3` | K3 | **1048576** | `reasoning_effort`: `low`/`high`/`max`（默认 `high`） | 图片、视频 |
+| `k3-256k` | K3 | **262144** | 同上 | 仅图片 |
+| `kimi-for-coding` | **K2.8 Preview** | **1048576** | `reasoning_effort`: `low`/`high`/`max`（默认 `max`） | 图片、视频 |
+| `kimi-for-coding-highspeed` | K2.7 Code HighSpeed | **262144** | `Thinking:ON`（**无档位**） | 图片、视频 |
+
+工具传入的 effort 官方映射（原文照抄）：
+
+```
+null / undefined       → 模型默认值（K3 为 high，K2.8 Preview 为 max）
+其它未知取值            → HTTP 400 请求报错
+ultra / max / xhigh    → max
+high / medium          → high（推荐）
+low / minimum / light  → low
+none                   → thinking.type disabled
+```
+
+**子串冲突提示**：`kimi-for-coding` 是 `kimi-for-coding-highspeed` 的前缀，而前者有三档、
+后者只有 Thinking 开关。插件的规则表靠「最长命中优先」区分这两者 —— 改动那张表时必须
+保住这个性质，否则会给高速版错误地补上档位。
 
 K3 官方注明：输入长度 + `max_completion_tokens` 超出窗口会返回 `invalid_request_error`；
 切换 effort 档位会破坏前缀缓存命中。

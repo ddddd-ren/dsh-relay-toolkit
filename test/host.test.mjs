@@ -711,3 +711,20 @@ test('noEffortReason 与 suggestEfforts 严格互斥', () => {
     assert.equal(noEffortReason(id), undefined, id + ' 不该被判成不支持档位')
   }
 })
+
+test('Kimi 新模型：kimi-for-coding 有档位，而 highspeed 版本不被它盖住', () => {
+  const threeTiers = { low: 'low', high: 'high', max: 'max' }
+
+  // K2.8 Preview 的官方 Model ID 是 `kimi-for-coding`（不是 kimi-k2.8）。
+  assert.deepEqual(suggestEfforts('kimi-for-coding'), threeTiers)
+  // K3 的 256K 版本走独立 id，档位相同。
+  assert.deepEqual(suggestEfforts('k3-256k'), threeTiers)
+  // Kimi Code 用 `k3`，API 开放平台用 `kimi-k3`，同一个模型。
+  assert.deepEqual(suggestEfforts('k3'), suggestEfforts('kimi-k3'))
+
+  // 子串冲突回归：`kimi-for-coding` 是 `kimi-for-coding-highspeed` 的前缀，但高速版
+  // 只有 Thinking 开关、没有档位。两张表合并 + 最长命中优先后，必须不被盖住。
+  assert.equal(suggestEfforts('kimi-for-coding-highspeed'), undefined,
+    '高速版不该被 kimi-for-coding 的档位盖住')
+  assert.match(noEffortReason('kimi-for-coding-highspeed') ?? '', /Thinking/)
+})
