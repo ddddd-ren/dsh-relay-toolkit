@@ -1,10 +1,21 @@
 {
   "name": "dsh-relay-toolkit",
   "version": "0.1.0",
-  "private": true,
   "type": "module",
   "description": "DSH plugin: sync models from relay /models endpoints, fill missing reasoningEfforts, and declare image input on llm-pi-ai routes | DSH 中转站模型同步、思考等级补全与多模态声明",
   "license": "MIT",
+  "author": "ddddd-ren",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ddddd-ren/dsh-relay-toolkit.git"
+  },
+  "homepage": "https://github.com/ddddd-ren/dsh-relay-toolkit#readme",
+  "bugs": {
+    "url": "https://github.com/ddddd-ren/dsh-relay-toolkit/issues"
+  },
+  "engines": {
+    "node": ">=18"
+  },
   "main": "lib/index.js",
   "exports": {
     ".": {
