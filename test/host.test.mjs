@@ -9,7 +9,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
-import { apply, name, inject, noEffortReason, suggestEfforts } from '../lib/index.js'
+import { apply, name, inject, noEffortReason, suggestEfforts, visionSupport as visionSupportOf } from '../lib/index.js'
 
 const NS = 'llm-pi-ai'
 const BASE_PATH = '/api/relay-toolkit'
@@ -727,4 +727,88 @@ test('Kimi 新模型：kimi-for-coding 有档位，而 highspeed 版本不被它
   assert.equal(suggestEfforts('kimi-for-coding-highspeed'), undefined,
     '高速版不该被 kimi-for-coding 的档位盖住')
   assert.match(noEffortReason('kimi-for-coding-highspeed') ?? '', /Thinking/)
+})
+
+test('新登记的「认得出但官方不给档位」家族，不被当成未识别', () => {
+  // Kimi K2.7 Code 高速版与普通版是同一个模型、思考行为一致，都只有 thinking 开关。
+  // 这两条也是子串对：高速版更长，靠最长命中选中同一条规则。
+  // 专用模型（Hy-MT2 翻译、Hy-Role 角色扮演、GLM-OCR）同理。
+  for (const id of [
+    'kimi-k2.7-code', 'kimi-k2.7-code-highspeed', 'kimi-k2.6',
+    'hy-mt2-pro', 'hy-mt2-plus', 'hy-mt2-lite',
+    'hy-role', 'hunyuan-role-latest', 'glm-ocr'
+  ]) {
+    assert.equal(suggestEfforts(id), undefined, id + ' 官方不支持 reasoning_effort')
+    assert.notEqual(noEffortReason(id), undefined,
+      id + ' 必须能被认出来 —— 否则界面会把它归进「家族认不出来」再补上无效档位')
+  }
+})
+
+test('新登记的官方规格：用 align 端点按内置规格表核对', async () => {
+  const state = makeState({
+    userProviders: {
+      gm: {
+        api: 'openai-completions',
+        baseURL: 'https://relay.example/v1',
+        models: [
+          { id: 'qwen3.7-flash', name: 'qwen3.7-flash' },
+          { id: 'hy-mt2-pro', name: 'hy-mt2-pro' },
+          { id: 'hy-role', name: 'hy-role' }
+        ]
+      }
+    }
+  })
+  // 发现结果为空 → 只能走内置规格表，正好验证表里的新数值。
+  const llm = { discoverModels: async () => [] }
+  const host = makeHost(state, { llm })
+  apply(host.ctx)
+
+  const { payload } = await callRoute(host, { method: 'POST', endpoint: '/align', body: { route: 'gm' } })
+  const byId = new Map(payload.value.fills.map(item => [item.id, item]))
+  assert.ok(payload.value.fills.every(item => item.source === 'spec'), '本轮全部来自规格表')
+
+  assert.equal(byId.get('qwen3.7-flash').contextWindow, 1000000, '百炼官方 1M')
+  assert.equal(byId.get('qwen3.7-flash').maxTokens, 131072)
+  assert.equal(byId.get('hy-mt2-pro').contextWindow, 8000, 'TokenHub 官方 8k')
+  assert.equal(byId.get('hy-mt2-pro').maxTokens, 4000)
+  assert.equal(byId.get('hy-role').contextWindow, 32000, 'TokenHub 官方 32k')
+  assert.equal(byId.get('hy-role').maxTokens, 4000)
+})
+
+test('新登记的支持图像家族，以及 mimo-v2.5 前缀的 except 排除', async () => {
+  const state = makeState({
+    userProviders: {
+      gm: {
+        api: 'openai-completions',
+        baseURL: 'https://relay.example/v1',
+        models: [
+          { id: 'kimi-k2.6', name: 'kimi-k2.6' },
+          { id: 'qwen3.8-max', name: 'qwen3.8-max' },
+          { id: 'MiniMax-M3', name: 'MiniMax-M3' },
+          { id: 'mimo-v2.5', name: 'mimo-v2.5' },
+          { id: 'mimo-v2.5-pro', name: 'mimo-v2.5-pro' }
+        ]
+      }
+    }
+  })
+  const host = makeHost(state)
+  apply(host.ctx)
+
+  const { payload } = await callRoute(host, { method: 'POST', endpoint: '/modalities', body: { route: 'gm' } })
+  assert.deepEqual(
+    payload.value.fills.map(item => item.id).sort(),
+    ['MiniMax-M3', 'kimi-k2.6', 'mimo-v2.5', 'qwen3.8-max'],
+    '官方确认能收图的才补，且都未声明 input'
+  )
+
+  // 前缀陷阱：mimo-v2.5 官方列了「全模态理解」，而同前缀的其它型号都没有该能力 ——
+  // `-pro` 只列文本生成，`-asr` / `-tts` 是语音。它们的最长命中全都是 `mimo-v2.5`，
+  // 单靠最长命中分不开，只能靠 except 逐个排除。这条正是回归防线。
+  assert.ok(payload.value.skipped.some(item => item.id === 'mimo-v2.5-pro'),
+    'mimo-v2.5-pro 不得因共享前缀被补上图像声明')
+  assert.equal(visionSupportOf('mimo-v2.5-asr'), undefined,
+    'mimo-v2.5-asr 是语音识别模型，不得被补上图像声明')
+  assert.equal(visionSupportOf('mimo-v2.5-tts'), undefined,
+    'mimo-v2.5-tts 是语音合成模型，不得被补上图像声明')
+  assert.notEqual(visionSupportOf('mimo-v2.5'), undefined, '只有裸的 mimo-v2.5 支持全模态理解')
 })

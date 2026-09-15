@@ -80,7 +80,7 @@ dsh plugin --profile desktop remove dsh-relay-toolkit
   `defaultMaxTokens`，上下文预算与溢出判定都会按那个默认值算。对齐后按真实容量计算。
 
   三处取舍：**发现结果优先**（官方目录与上游给什么就用什么）；它们没给的项才退到**内置官方
-  规格表**（2026-09-11 人工核对、每条带官方来源，完整表见 `docs/MODEL_SPECS.md`）；
+  规格表**（2026-09-16 人工核对、每条带官方来源，完整表见 `docs/MODEL_SPECS.md`）；
   **已经填好的数值一律不覆盖**，只填空缺。
 
   结果里会标出有多少个用了规格表 —— 那是**官方值，不一定等于你中转站的上限**
@@ -104,9 +104,10 @@ dsh plugin --profile desktop remove dsh-relay-toolkit
 
 为什么要分：DSH 会把 `reasoningEfforts` 里的档位显示给用户选，一选就真发
 `reasoning_effort`；对不支持该参数的上游，这是报错或静默忽略。所以
-`glm-5.1`、`kimi-k2.6`、`kimi-k2.7-code`、`kimi-for-coding-highspeed`、`mimo-v2.5*`、
-`MiniMax-M3`、`MiniMax-M2.7*`、`qwen3.7-*`、`hy4-preview` 这些模型**一个字段都不写**，
-无论你点哪个按钮。
+`glm-5.1`、`kimi-k2.6`、`kimi-k2.7-code`（含 `-highspeed`）、`kimi-for-coding-highspeed`、
+`mimo-v2.5*`、`MiniMax-M3`、`MiniMax-M2.7*`、`qwen3.7-*`、`hy4-preview`，
+以及混元翻译/角色扮演（`hy-mt2*`、`hy-role`、`hunyuan-role-latest`）与 `glm-ocr`
+这些模型**一个字段都不写**，无论你点哪个按钮。
 
 ### 图像输入声明（多模态）
 
@@ -130,11 +131,20 @@ dsh plugin --profile desktop remove dsh-relay-toolkit
 
 1. 只写 `input`，**不写** `inputModalities`。后者是 DSH 内置适配器（`llm-deepseek`）
    的字段，pi-ai 风格的路由用的是 `input`，写错等于没写；
-2. 只补官方文档确认能收图的模型（`deepseek-flash` / `deepseek-v4.1*`、`glm-5.3-flash`、
-   Kimi Code 的四个 Model ID）；国外厂商本轮没有可核对的官方来源，一个都不补；
+2. 只补官方文档确认能收图的模型：`deepseek-flash` / `deepseek-v4.1*`、
+   `glm-5.3-flash`、Kimi 的 `kimi-k3` / `k3-256k` / `kimi-for-coding*` / `kimi-k2.6` /
+   `kimi-k2.7-code*`、Qwen 的 `qwen3.8-max` / `qwen3.8-flash` / `qwen3.7-plus` / `qwen3.7-flash`、
+   `MiniMax-M3`、`mimo-v2.5`（**不含 `mimo-v2.5-pro`**，见下）。
+   国外厂商本轮复核依旧没有可核对的官方来源，一个都不补；
 3. **官方能力 ≠ 中转站能力**。声明只代表模型本身能收图，你的中转站是否真的向上游透传
    图像**必须自己实测**。所以这一步**必须由你点**，
    不参与自动补全 —— 写错了的表现是请求被上游拒绝，而不是静默降级。
+
+**前缀陷阱（改多模态表时务必保住）**：`mimo-v2.5` 官方列了「全模态理解」，
+而同前缀的其它型号都没有该能力（`mimo-v2.5-pro` 只列文本生成，`mimo-v2.5-asr` 是语音识别，
+`mimo-v2.5-tts*` 是语音合成）—— 它们的最长命中长度全都一样（都是 `mimo-v2.5`），
+**单靠最长命中分不开**。所以那张表支持 `except`：命中 `except` 里任意一条即视为认不出、不写声明。
+`kimi-for-coding` 与 `kimi-for-coding-highspeed` 是同类问题，但两者能力相同，靠最长命中即可。
 
 已经声明过 `input` 的条目（哪怕只写了 `text`）一律不动：那是你的明确表态。
 
@@ -163,7 +173,7 @@ dsh plugin --profile desktop remove dsh-relay-toolkit
 `__ModuleLoader__` bundle）都是可直接运行的产物。
 
 ```sh
-node --test test/host.test.mjs test/client.test.mjs   # 30 项
+node --test test/host.test.mjs test/client.test.mjs   # 35 项
 node test/cordis-smoke.mjs                            # 真实 cordis 冒烟
 ```
 
@@ -172,6 +182,9 @@ node test/cordis-smoke.mjs                            # 真实 cordis 冒烟
   上游报错不写入、非本机拒绝、未知端点、无 web 服务时仍可加载、短别名归一化、
   「官方不支持档位」与「认不出家族」的区分；对齐部分另外覆盖
   发现结果驱动写入、已有容量不被覆盖、发现失败只记原因不写入、缺 `llm` 服务时报可读原因。
+  另有三组回归用例钉住 2026-09-16 新增的条目：新登记「认得出但官方不给档位」的家族、
+  新登记官方规格（`qwen3.7-flash` / `hy-mt2*` / `hy-role`）、以及 `mimo-v2.5` 前缀下
+  `mimo-v2.5-pro` 的 `except` 排除。
 - `test/client.test.mjs`：执行 `lib/client.js`，验证 bundle 契约（以包名注册、
   只依赖平台播种表内的 react）与 `settings.section` 的注册形状。
 - `test/cordis-smoke.mjs`：用**真实的 `@deepseek-ai/cordis`** 加载本插件，确认嵌套
@@ -233,6 +246,9 @@ dsh plugin --profile desktop add file:C:/Users/<你>/dsh-plugins/dsh-relay-toolk
 - **规则表是子串匹配 + 最长命中优先**：`kimi-for-coding` 是 `kimi-for-coding-highspeed`
   的前缀，前者有三档、后者只有 Thinking 开关，全靠最长命中区分开。改动那张表时要保住
   这个性质，否则会给高速版错误地补上档位。
+- **最长命中解决不了的，用 `except`**：多模态表里 `mimo-v2.5` 与 `mimo-v2.5-pro` 的
+  最长命中长度相同（都是 `mimo-v2.5`），但只有前者官方支持图像输入 —— 这种「共享前缀、
+  能力不同」的情况必须显式排除，不能指望最长命中。
 - 中转站 `/models` 若返回非 `{ data: [...] }` 结构会报错并保持配置不变。
 - 中转站返回的模型 id 会原样写入；若你的中转站把渠道前缀写进 id（如 `openai/gpt-5.5`），
   同步进来的也就是那个 id。
