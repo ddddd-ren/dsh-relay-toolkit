@@ -2,10 +2,11 @@
 
 给 **DeepSeek Harness（DSH）** 用的中转站维护插件：把中转站 `/models` 里缺失的模型合并进
 `llm-pi-ai` 路由，给缺少 `reasoningEfforts` 声明的模型补上思考等级，把上下文窗口与最大
-输出上限对齐到官方目录（或上游）给出的数值，并补上缺失的图像输入声明（多模态）。
+输出上限对齐到官方目录（或上游）给出的数值，补上缺失的图像输入声明（多模态），
+并**实测每个模型是否真的调得通**。
 
 设置页会多出一个「中转站工具」区块，每条路由一张卡片。按钮随该路由的实际情况出现：
-**同步模型**恒在，**补全思考等级**、**用通用模板补全**、**对齐窗口与输出**、
+**同步模型**与**测试连通性**恒在，**补全思考等级**、**用通用模板补全**、**对齐窗口与输出**、
 **补全图像声明**按需出现，卡片底部另有一个**刷新**。若当前默认模型缺图像声明，
 区块顶部会单独告警 —— 那正是「模型支持却读不了图」的直接成因。
 
@@ -16,8 +17,9 @@
 - **不按模型名字猜能力。** 只覆盖能确认的家族（deepseek / glm / kimi / qwen / hy3）；
   认不出来的模型在界面上标为「未识别」，一个字段都不写。
 - **不改 `baseURL`、`apiKeyEnv`、`compat`，也不删任何模型条目。**
-- **不发送遥测。** 唯一的对外请求是向你在 settings.yaml 里配置的那条路由自己的
-  `baseURL + /models` 发 GET，并带上该路由自己的凭据引用解析出的 Key。
+- **不发送遥测。** 对外请求只有两类，都发往你在 settings.yaml 里配置的那条路由自己的
+  `baseURL`：向 `/models` 发 GET（带该路由凭据引用解析出的 Key），
+  以及**你点「测试连通性」时**向 `/chat/completions`（或 `/responses`）发的那一句 `hi`。
 
 ## 行为保证
 
@@ -31,6 +33,8 @@
 | 只写合法声明 | 建议值经 `LEVELS` 白名单过滤；等级键只能是 `off/minimal/low/medium/high/xhigh/max`，值只能是该等级的线上拼写（仅 `off` 可为 `null`），且至少一个非 `off` 等级 |
 | 不给官方不支持的模型写档位 | 官方确认不支持 `reasoning_effort` 的家族一个字段都不写，连「用通用模板补全」也绕开它们（见下方「官方不支持档位 ≠ 认不出家族」） |
 | 不猜多模态能力 | 图像输入声明只补官方文档确认能收图的模型，认不出就不写；已声明 `input` 的条目（含只写 `text`）一律不动 |
+| 探测绝不写配置 | `/probe` 只发一句 `hi` 并回报结果，不调用 `settings.update`；对不可写的路由同样可用 |
+| 探测不误报限流 | 单次最多 50 个模型、并发 3，避免把「被上游限流」误报成「模型不可用」 |
 
 ## 安装
 
@@ -90,7 +94,45 @@ dsh plugin --profile desktop remove dsh-relay-toolkit
 
 - **补全图像声明（N）**：给「官方确认能收图、但条目没声明 `input`」的模型写入
   `input: [text, image]`。**必须由你点**，不参与自动补全（理由见下方「图像输入声明」）。
+- **测试连通性（N）**：向该路由的每个模型发一句 `hi`，看能不能拿回回复 ——
+  失败排在前面，每条给出耗时与失败原因。**这是唯一会向上游发计费请求的按钮**
+  （每次约几十 token），但**只读不写配置**，也不受「该路由不可写」限制。
+  详见下方「连通性探测」。
 - **刷新**：重新拉一次 `/status`，卡片上的数量与按钮随之更新。
+
+### 连通性探测：为什么需要它
+
+**`/models` 只说明「列出了」，不说明「调得通」。** 渠道掉线、密钥没开通、模型已下线、
+账户余额不足，都会让条目继续留在列表里 —— 而 `/models` 与 `discoverModels` 都回答不了
+「这个模型现在到底能不能用」。只有真发一次请求才能把两者分开。
+
+实测过的真实差别（同一份 `/models` 列表里，条目长得一模一样）：
+
+| 情况 | 探测结果 |
+|---|---|
+| 正常可用 | `✓ 1683ms 回复="Hi there! How can I help you today?" 输出 10 token` |
+| 模型在这条渠道上没有 | `✗ 351ms 上游说：No available channel for model ... under group 国模` |
+| 账户余额不足 | `✗ 849ms 上游说：Insufficient account balance；上游拒绝了这次调用（HTTP 403...）` |
+
+**四条设计取舍**：
+
+1. **输入固定是最短的 `hi`**，`max_tokens` 压到 32 —— 探测要回答的只是「通不通」，
+   不是「答得好不好」。为什么不是 1：GLM-5.3、Kimi K3 这类**强制思考**的模型会把预算
+   先花在思考上，实测 `glm-5.3-flash` 回一句问候就用了 **264 token**，
+   预算过小时可能直接被上游拒绝。
+2. **上游自己给的原因优先**。中转站对「余额不足」也回 403 —— 若照状态码猜成「密钥无效」，
+   你会去改密钥，而真正该做的是充值。所以上游的 `message` 永远排在状态码解释之前。
+3. **抓「假成功」**：HTTP 200 不等于成功。有的中转站把上游错误包在 200 的 body 里，
+   插件会检查 `error` 字段；也认 `reasoning_content` 与 Responses API 的 `output_text`。
+4. **限流与截断**：单次最多探 50 个模型、并发 3 —— 一次点击不该对中转站发起并发冲击
+   （那会把「被限流」误报成「模型不可用」），也不该打出几百个计费请求。被截断时界面会说明。
+
+**不支持的协议如实说明**：只有 OpenAI 兼容的 `openai-completions` 与 `openai-responses`
+能这样探。别的 `api` 类型（如 Anthropic Messages）报文形状不同，硬拼请求只会得到
+误导性的失败，所以直接回一句「暂不支持探测」，**不发请求**。
+
+**超时 30 秒**，比 `/models` 的 15 秒宽松：强制思考的模型首个 token 可能要等十几秒。
+超时会提示「可重试一次」，而不是断言模型不可用。
 
 ### 官方不支持档位 ≠ 认不出家族
 
@@ -173,7 +215,7 @@ dsh plugin --profile desktop remove dsh-relay-toolkit
 `__ModuleLoader__` bundle）都是可直接运行的产物。
 
 ```sh
-node --test test/host.test.mjs test/client.test.mjs   # 35 项
+node --test test/host.test.mjs test/client.test.mjs   # 45 项
 node test/cordis-smoke.mjs                            # 真实 cordis 冒烟
 ```
 
@@ -185,6 +227,10 @@ node test/cordis-smoke.mjs                            # 真实 cordis 冒烟
   另有三组回归用例钉住 2026-09-16 新增的条目：新登记「认得出但官方不给档位」的家族、
   新登记官方规格（`qwen3.7-flash` / `hy-mt2*` / `hy-role`）、以及 `mimo-v2.5` 前缀下
   `mimo-v2.5-pro` 的 `except` 排除。
+  探测部分（9 项）覆盖：报文形状（端点、鉴权头、`max_tokens` 压到最小）、
+  只读不写配置、401/403/404/429 的错误翻译、**403 以上游原因为准**、
+  「HTTP 200 但 body 是错误」的假成功、`reasoning_content` 与 Responses API 的
+  `output_text`、不支持的 `api` 类型不发请求、模型数截断与并发。
 - `test/client.test.mjs`：执行 `lib/client.js`，验证 bundle 契约（以包名注册、
   只依赖平台播种表内的 react）与 `settings.section` 的注册形状。
 - `test/cordis-smoke.mjs`：用**真实的 `@deepseek-ai/cordis`** 加载本插件，确认嵌套
@@ -279,7 +325,7 @@ copy %USERPROFILE%\.dsh\settings.yaml %USERPROFILE%\.dsh\settings.yaml.bak
 
 ## HTTP 端点
 
-设置页用的就是这四个端点，挂在 `/api/relay-toolkit` 前缀下，只服务本机（loopback）。
+设置页用的就是这五个端点，挂在 `/api/relay-toolkit` 前缀下，只服务本机（loopback）。
 业务失败也回 HTTP 200，但带 `ok: false`：
 
 | 方法 | 路径 | 请求体 | 说明 |
@@ -289,11 +335,19 @@ copy %USERPROFILE%\.dsh\settings.yaml %USERPROFILE%\.dsh\settings.yaml.bak
 | POST | `/autofill` | `{ route?, includeUnknown? }` | 补思考等级；省略 `route` 则处理全部路由 |
 | POST | `/align` | `{ route? }` | 用 `discoverModels` 对齐窗口与输出上限 |
 | POST | `/modalities` | `{ route? }` | 给官方确认能收图的模型补 `input: [text, image]` |
+| POST | `/probe` | `{ route, models? }` | 发一句 `hi` 实测连通性；**只读**，但会向上游发计费请求 |
+
+`/probe` 是唯一必须显式指定 `route` 的端点 —— 一次点击不该把全部路由都探一遍。
+`models` 可选，用来只探指定模型。返回 `{ route, baseURL, api, prompt, total, truncated,
+okCount, failedCount, results: [{ id, ok, ms, reply?, usage?, reason?, status? }] }`。
 
 响应形如 `{ ok: true, value: … }` 或 `{ ok: false, error: { message } }`。手工调用：
 
 ```powershell
 Invoke-RestMethod http://127.0.0.1:<DSH端口>/api/relay-toolkit/status
+# 探一条路由（会向上游发出真实的计费请求）：
+Invoke-RestMethod http://127.0.0.1:<DSH端口>/api/relay-toolkit/probe -Method POST `
+  -ContentType 'application/json' -Body '{"route":"gm"}'
 ```
 
 ## License

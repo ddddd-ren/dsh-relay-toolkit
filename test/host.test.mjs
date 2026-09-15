@@ -812,3 +812,256 @@ test('新登记的支持图像家族，以及 mimo-v2.5 前缀的 except 排除'
     'mimo-v2.5-tts 是语音合成模型，不得被补上图像声明')
   assert.notEqual(visionSupportOf('mimo-v2.5'), undefined, '只有裸的 mimo-v2.5 支持全模态理解')
 })
+
+/** 造一个探测用的路由，模型列表可指定。 */
+function probeState (ids) {
+  return makeState({
+    userProviders: {
+      gm: {
+        api: 'openai-completions',
+        baseURL: 'https://relay.example/v1',
+        apiKeyEnv: 'GM_API_KEY',
+        models: ids.map(id => ({ id, name: id }))
+      }
+    }
+  })
+}
+
+/** 一个成功的 Chat Completions 响应。 */
+function chatOk (content) {
+  return {
+    ok: true,
+    status: 200,
+    async text () {
+      return JSON.stringify({
+        choices: [{ message: { role: 'assistant', content } }],
+        usage: { prompt_tokens: 3, completion_tokens: 2 }
+      })
+    }
+  }
+}
+
+test('probe 发一句 hi 判定模型可用，并带上耗时与回复', async t => {
+  const state = probeState(['glm-5.2'])
+  const seen = []
+  stubFetch(t, async (url, init) => {
+    seen.push({ url, init })
+    return chatOk('你好！')
+  })
+  const host = makeHost(state)
+  apply(host.ctx)
+
+  const { payload } = await callRoute(host, { method: 'POST', endpoint: '/probe', body: { route: 'gm' } })
+  assert.equal(payload.ok, true)
+  const value = payload.value
+  assert.equal(value.okCount, 1)
+  assert.equal(value.failedCount, 0)
+  assert.equal(value.prompt, 'hi', '探测输入就是 hi')
+  assert.equal(value.results[0].id, 'glm-5.2')
+  assert.equal(value.results[0].ok, true)
+  assert.equal(value.results[0].reply, '你好！')
+  assert.equal(value.results[0].usage.outputTokens, 2)
+  assert.ok(Number.isInteger(value.results[0].ms))
+
+  // 报文本身也要对：端点、鉴权头、以及**压到最小的 max_tokens**。
+  assert.equal(seen[0].url, 'https://relay.example/v1/chat/completions')
+  assert.equal(seen[0].init.method, 'POST')
+  assert.equal(seen[0].init.headers.authorization, 'Bearer sk-test', '用该路由自己的凭据')
+  const sent = JSON.parse(seen[0].init.body)
+  assert.equal(sent.model, 'glm-5.2')
+  assert.deepEqual(sent.messages, [{ role: 'user', content: 'hi' }])
+  assert.equal(sent.max_tokens, 32, 'max_tokens 必须压到最小，探测成本可忽略')
+
+  // 探测是**只读**的：一个字段都不许写。
+  assert.equal(state.updates.length, 0, '探测绝不写配置')
+})
+
+test('probe 把上游错误翻译成可指导下一步的原因', async t => {
+  const state = probeState(['a', 'b', 'c', 'd'])
+  stubFetch(t, async (url, init) => {
+    const model = JSON.parse(init.body).model
+    if (model === 'a') return { ok: false, status: 401, async text () { return '{"error":{"message":"invalid key"}}' } }
+    if (model === 'b') return { ok: false, status: 404, async text () { return '{"error":{"message":"model not found"}}' } }
+    if (model === 'c') return { ok: false, status: 429, async text () { return 'rate limited' } }
+    return chatOk('ok')
+  })
+  const host = makeHost(state)
+  apply(host.ctx)
+
+  const { payload } = await callRoute(host, { method: 'POST', endpoint: '/probe', body: { route: 'gm' } })
+  const byId = new Map(payload.value.results.map(item => [item.id, item]))
+  assert.equal(payload.value.okCount, 1)
+  assert.equal(payload.value.failedCount, 3)
+
+  assert.match(byId.get('a').reason, /密钥无效/, '401 指向密钥问题')
+  assert.match(byId.get('a').reason, /invalid key/, '要把上游自己给的原因带出来')
+  assert.match(byId.get('b').reason, /没有这个模型/)
+  assert.match(byId.get('c').reason, /限流/)
+  assert.equal(byId.get('d').ok, true)
+})
+
+test('probe 遇到 403 时以上游原因为准，不武断说成密钥问题', async t => {
+  // 实测踩到的坑：中转站对「余额不足」也回 403。若照状态码猜成「密钥无效」，
+  // 用户会去改密钥，而真正该做的是充值 —— 所以上游的 message 必须排在前面。
+  const state = probeState(['paid-model'])
+  stubFetch(t, async () => ({
+    ok: false,
+    status: 403,
+    async text () { return '{"error":{"message":"Insufficient account balance"}}' }
+  }))
+  const host = makeHost(state)
+  apply(host.ctx)
+
+  const { payload } = await callRoute(host, { method: 'POST', endpoint: '/probe', body: { route: 'gm' } })
+  const reason = payload.value.results[0].reason
+  assert.match(reason, /Insufficient account balance/, '上游原因必须出现')
+  assert.ok(reason.indexOf('Insufficient account balance') < reason.indexOf('403'),
+    '上游原因要排在状态码解释之前，避免误导')
+  assert.match(reason, /余额不足/, '403 的解释要提到余额这种可能')
+})
+
+test('probe 抓得住「HTTP 200 但 body 里是错误」的假成功', async t => {
+  const state = probeState(['ghost-model'])
+  stubFetch(t, async () => ({
+    ok: true,
+    status: 200,
+    async text () {
+      // 中转站常见的伪装：状态码 200，错误塞在 body 里。
+      return JSON.stringify({ error: { message: 'upstream channel offline', type: 'upstream_error' } })
+    }
+  }))
+  const host = makeHost(state)
+  apply(host.ctx)
+
+  const { payload } = await callRoute(host, { method: 'POST', endpoint: '/probe', body: { route: 'gm' } })
+  assert.equal(payload.value.okCount, 0, '200 不等于成功')
+  assert.match(payload.value.results[0].reason, /upstream channel offline/)
+})
+
+test('probe 对「调用通了但没内容」与网络失败分别给出可读原因', async t => {
+  const state = probeState(['empty', 'netfail'])
+  stubFetch(t, async (url, init) => {
+    const model = JSON.parse(init.body).model
+    if (model === 'empty') {
+      return { ok: true, status: 200, async text () { return JSON.stringify({ choices: [{ message: { content: '' } }] }) } }
+    }
+    throw new Error('ECONNREFUSED')
+  })
+  const host = makeHost(state)
+  apply(host.ctx)
+
+  const { payload } = await callRoute(host, { method: 'POST', endpoint: '/probe', body: { route: 'gm' } })
+  const byId = new Map(payload.value.results.map(item => [item.id, item]))
+  assert.equal(byId.get('empty').ok, false)
+  assert.match(byId.get('empty').reason, /没有任何文本内容/)
+  assert.equal(byId.get('netfail').ok, false)
+  assert.match(byId.get('netfail').reason, /请求发不出去/)
+})
+
+test('probe 认得强制思考模型只回 reasoning_content 的情况', async t => {
+  const state = probeState(['glm-5.3'])
+  stubFetch(t, async () => ({
+    ok: true,
+    status: 200,
+    async text () {
+      // 强制思考的模型可能把内容全放在 reasoning_content 里 —— 那也证明调用是通的。
+      return JSON.stringify({
+        choices: [{ message: { role: 'assistant', content: '', reasoning_content: '用户在打招呼' } }]
+      })
+    }
+  }))
+  const host = makeHost(state)
+  apply(host.ctx)
+
+  const { payload } = await callRoute(host, { method: 'POST', endpoint: '/probe', body: { route: 'gm' } })
+  assert.equal(payload.value.okCount, 1, 'reasoning_content 有内容同样算可用')
+  assert.match(payload.value.results[0].reply, /打招呼/)
+})
+
+test('probe 支持只探指定模型，并识别 openai-responses 协议', async t => {
+  const state = makeState({
+    userProviders: {
+      gm: {
+        api: 'openai-responses',
+        baseURL: 'https://relay.example/v1',
+        apiKeyEnv: 'GM_API_KEY',
+        models: [{ id: 'm1', name: 'm1' }, { id: 'm2', name: 'm2' }, { id: 'm3', name: 'm3' }]
+      }
+    }
+  })
+  const seen = []
+  stubFetch(t, async (url, init) => {
+    seen.push({ url, body: JSON.parse(init.body) })
+    return {
+      ok: true,
+      status: 200,
+      async text () {
+        return JSON.stringify({ output_text: 'hi there', usage: { input_tokens: 5, output_tokens: 2 } })
+      }
+    }
+  })
+  const host = makeHost(state)
+  apply(host.ctx)
+
+  const { payload } = await callRoute(host, {
+    method: 'POST',
+    endpoint: '/probe',
+    body: { route: 'gm', models: ['m1', 'm3'] }
+  })
+  assert.deepEqual(payload.value.results.map(item => item.id), ['m1', 'm3'], '只探指定的模型')
+  assert.equal(seen.length, 2, '没被点名的模型不该被请求')
+  assert.equal(seen[0].url, 'https://relay.example/v1/responses', 'responses 协议走 /responses')
+  assert.equal(seen[0].body.input, 'hi', 'responses 用 input 而不是 messages')
+  assert.equal(seen[0].body.max_output_tokens, 32)
+  assert.equal(payload.value.results[0].usage.inputTokens, 5, '认得出 responses 的 usage 字段名')
+})
+
+test('probe 对不支持的 api 类型如实说明，而不是拼一个错请求', async t => {
+  const state = makeState({
+    userProviders: {
+      gm: {
+        api: 'anthropic-messages',
+        baseURL: 'https://relay.example/v1',
+        models: [{ id: 'claude-x', name: 'claude-x' }]
+      }
+    }
+  })
+  let called = false
+  stubFetch(t, async () => { called = true; return chatOk('x') })
+  const host = makeHost(state)
+  apply(host.ctx)
+
+  const { payload } = await callRoute(host, { method: 'POST', endpoint: '/probe', body: { route: 'gm' } })
+  assert.equal(payload.value.results[0].ok, false)
+  assert.match(payload.value.results[0].reason, /暂不支持探测 api 类型/)
+  assert.equal(called, false, '不支持的协议不该真的发请求')
+})
+
+test('probe 缺少 route、路由不存在、无模型时都给出可读错误', async t => {
+  const host = makeHost(probeState(['x']))
+  apply(host.ctx)
+
+  const missing = await callRoute(host, { method: 'POST', endpoint: '/probe', body: {} })
+  assert.equal(missing.payload.ok, false)
+  assert.match(missing.payload.error.message, /缺少 route/)
+
+  const unknown = await callRoute(host, { method: 'POST', endpoint: '/probe', body: { route: 'nope' } })
+  assert.equal(unknown.payload.ok, false)
+  assert.match(unknown.payload.error.message, /不在用户配置层/)
+})
+
+test('probe 限制单次探测的模型数，并如实报告被截断', async t => {
+  // 造 55 个模型：超过 PROBE_MAX_MODELS（50）后必须截断，防止一次点击打出几百个计费请求。
+  const ids = Array.from({ length: 55 }, (_, index) => 'model-' + String(index))
+  const state = probeState(ids)
+  let calls = 0
+  stubFetch(t, async () => { calls += 1; return chatOk('ok') })
+  const host = makeHost(state)
+  apply(host.ctx)
+
+  const { payload } = await callRoute(host, { method: 'POST', endpoint: '/probe', body: { route: 'gm' } })
+  assert.equal(payload.value.results.length, 50, '单次最多探 50 个')
+  assert.equal(payload.value.truncated, true)
+  assert.equal(payload.value.total, 55)
+  assert.equal(calls, 50, '被截断的模型不该真的发请求')
+})
