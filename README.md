@@ -187,6 +187,40 @@ Grok 的旧型号同理：`grok-4`（含 `-fast` / `-1-fast` / `-0709`）、`gro
 "Reasoning: Supported" 而**未公布档位枚举**，插件登记为刻意不写；**Gemini 的上下文窗口与
 最大输出一个数字都没取到**，所以只写档位、不写规格。
 
+**OpenAI o 系列**（`o1` / `o3` / `o3-mini` / `o4-mini` / `o3-pro`）：官方支持表只标了
+「Reasoning effort ✅」而**未逐型号列出枚举**。插件按官方给的三条适用范围约束反推，
+只写唯一确定可用的三档 `low` / `medium` / `high`：
+`none` 的官方列表不含 o 系列；`minimal` 官方原文限定 "only with the **original GPT-5**
+reasoning models"；`xhigh` / `max` 限定更新的型号。规格统一 200,000 / 100,000。
+官方脚注还明确 `o1-mini` **不支持** `reasoning_effort`、`gpt-5-codex` 不支持 `minimal`，两者都已单独处理。
+
+### 短 id 需要词边界（改表时留意）
+
+`match` 是子串匹配，但**长度 < 4 的模式额外要求落在词边界上**。这不是洁癖，是踩出来的：
+`o1` / `o3` 这种两字符模式当裸子串用，会命中 `audio1`、`video3`、`ratio1` 这些
+**完全无关**的模型 id，并给它们写进一组根本不支持的思考档位（实测确认）。
+
+边界规则：id 里以 `-` / `_` / `.` / `/` / `:` 或串首开头、且后面紧跟分隔符或串尾才算命中。
+于是 `o3`、`o3-mini`、`gpt-o3`、`openai/o3` 命中，而 `audio1`、`video3` 不命中。
+长模式（≥4 字符）保持原来的纯子串语义 —— 那是 `openai/gpt-5.1-codex-max` 这类
+带渠道前缀的 id 需要的宽松匹配。三张表（档位 / 规格 / 多模态）共用同一套边界规则。
+
+### 覆盖度自查
+
+改完规则表想知道「主流厂商都覆盖到了吗」，跑：
+
+```sh
+node scripts/coverage-report.mjs
+```
+
+它会打印三张表的全部规则，并用一批代表性 id（覆盖国内外主流厂商）实测判定，
+最后给出「认不出」的数量。**认不出的模型会被界面列为「需要你决定」**，
+所以这个数字就是插件的实际能力缺口。
+
+已知仍认不出的（官方数据未取得，按「认不出就不写」处理）：
+Meta Llama 全系、Mistral 除 `mistral-large-3`（已补规格）外、Cohere Command、
+百度 ERNIE、字节豆包、阶跃 Step，以及 `phi-4` 等。
+
 ### Grok 的档位随版本变（改表时务必留意）
 
 Grok 是这张表里唯一「**同家族不同版本档位不同、且能不能关闭推理也变**」的情况：
@@ -303,7 +337,7 @@ DSH 实现做 20 项静态契约断言（含「`settings.get()` 必须不存在�
 `__ModuleLoader__` bundle）都是可直接运行的产物。
 
 ```sh
-node --test test/host.test.mjs test/client.test.mjs test/scripts.test.mjs   # 73 项
+node --test test/host.test.mjs test/client.test.mjs test/scripts.test.mjs   # 75 项
 node test/cordis-smoke.mjs                            # 真实 cordis 冒烟
 node test/real-settings-smoke.mjs                     # 真实 settings 形状下的端到端
 node test/contract-0.2.mjs                            # 真实 DSH 0.2 契约核对（20 项）
@@ -324,9 +358,10 @@ node test/contract-0.2.mjs                            # 真实 DSH 0.2 契约核
   **0.2 适配部分（6 项）**：无 `settings.get` 时照常工作、`value`/`user` 分层读取、
   `inputModalities` 优先于内置表、无模态时退回内置表、发现失败仍兜底、
   缺 `settings` 服务时端点回可读原因。
-  **新模型规则部分（5 项）**：OpenAI 档位随型号收窄且不写只在 Responses API 可用的 `max`、
+  **新模型规则部分（7 项）**：OpenAI 档位随型号收窄且不写只在 Responses API 可用的 `max`、
   `gpt-5-pro` 只有 `high` 且 `gpt-5.1-codex-max` 独有 `xhigh`、Anthropic 五档含 `xhigh`
-  但不写 `off`、Gemini 只有官方四档、小米 V2.6 无档位且两代多模态能力分布相反。
+  但不写 `off`、Gemini 只有官方四档、小米 V2.6 无档位且两代多模态能力分布相反、
+  OpenAI o 系列只给官方确定的三档、短 id 需词边界（`o1`/`o3` 不误伤 `audio1`/`video3`）。
 - `test/client.test.mjs`：执行 `lib/client.js`，验证 bundle 契约（以包名注册、
   只依赖平台播种表内的 react）与 `settings.section` 的注册形状。
 - `test/scripts.test.mjs`（10 项）：`scripts/fix-efforts.mjs` 的参数解析与安全阀。

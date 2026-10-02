@@ -304,6 +304,32 @@ M2.7 及更早的 M 系列**没有**这类官方表述，一律不补。
 > 界面显示一个在该协议下必然被拒的档位。注意这与 Claude 的 `max` 无关 —— 后者是
 > Anthropic 自己的 effort 枚举，不受 OpenAI 的 Responses API 限制。
 
+**o 系列（推理模型）**：官方支持表对 `codex-mini` / `o3-pro` / `o4-mini` / `o3` / `o3-mini` / `o1`
+**全部**标了「Reasoning effort ✅」，但**未逐型号列出枚举**。规格统一 200,000 输入 / 100,000 输出。
+
+插件按官方那三条适用范围约束反推，只写唯一确定可用的三档 `low` / `medium` / `high`：
+
+| 档位 | 官方原文的适用范围 | o 系列能否用 |
+|---|---|---|
+| `none` | 5.6 / 5.5 / 5.4 / 5.2 / 5.1 系列 | ❌ 列表不含 o 系列 |
+| `minimal` | "only with the **original GPT-5** reasoning models" | ❌ 不是 GPT-5 |
+| `low`/`medium`/`high` | 通用枚举 | ✅ |
+| `xhigh` | GPT-6 / 5.6 / 5.5 / 5.4 / `gpt-5.1-codex-max` | ❌ 限定更新的型号 |
+| `max` | GPT-6 / 5.6 且 Responses API | ❌ |
+
+官方另有两处脚注，插件都已单独处理：**`o1-mini` 不支持 `reasoning_effort`**；
+**`gpt-5-codex` 不支持 `minimal`**。
+
+### Mistral（AWS Bedrock 官方模型卡 —— **云平台口径**）
+
+| 模型 | 上下文 | 最大输出 | 档位 |
+|---|---|---|---|
+| `mistral-large-3` | 256K | 32K | **卡片未提 reasoning**，插件只写规格、不写档位 |
+
+来源：<https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-mistral-ai-mistral-large-3.html>
+
+Mistral 其余型号（`mistral-medium-3`、`magistral-medium` 等）本轮未取得官方数据，插件无规则。
+
 ### Anthropic Claude
 
 **档位枚举（厂商官方一手来源，Anthropic 官方 SDK 的生成代码）**：
@@ -425,4 +451,20 @@ DSH 0.2 起配置**不在 `~/.dsh/settings.yaml`**（旧文件会被一次性导
 `docs.cloud.google.com`、`generativelanguage.googleapis.com` 全部抓取失败，
 `r.jina.ai` 代理亦失败）。所以插件**不给 Gemini 写规格**，只写档位。
 
-**Meta / Mistral**：本轮未查证，插件里没有任何规则（认不出就不写）。
+**Meta Llama**：`llama-4-scout` / `llama-4-maverick` / `llama-3.3-70b` 均未取得官方档位数据，
+插件无规则（认不出就不写）。本轮曾派查证任务但未返回结果，**未完成**。
+
+**Mistral**：仅 `mistral-large-3` 取得 Bedrock 官方模型卡的规格（256K / 32K），
+档位未提故不写；`mistral-medium-3` / `magistral-medium` 未查证。
+
+**Cohere**：`docs.cohere.com` 的 Reasoning 与 Command A Reasoning 页面均可访问，
+但**正文被导航结构占满、未取到实质档位内容**，故不收录。
+
+**国产厂商**：百度 ERNIE（`ernie-5.0`）、字节豆包（`doubao-pro`）、阶跃 Step（`step-3`）
+本轮未查证（派出的查证任务未返回结果），插件无规则。
+
+### 覆盖度自查
+
+改完规则表后跑 `node scripts/coverage-report.mjs`：它打印三张表的全部规则，
+并用一批覆盖国内外主流厂商的代表性 id 实测判定，最后给出「认不出」的数量。
+截至 2026-10-03，66 个样本中 13 个认不出（即上列未取得官方数据的厂商）。

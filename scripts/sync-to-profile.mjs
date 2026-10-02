@@ -47,7 +47,8 @@ const FILES = [
   'README.md',
   'scripts/fix-efforts.mjs',
   'scripts/unpack-dsh.mjs',
-  'scripts/sync-to-profile.mjs'
+  'scripts/sync-to-profile.mjs',
+  'scripts/coverage-report.mjs'
 ]
 
 /** 整目录同步：逐个文件比对，新增的也带过去。 */

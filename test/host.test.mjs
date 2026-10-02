@@ -886,6 +886,51 @@ test('小米 MiMo V2.6：只有 thinking 开关，且两代多模态能力分布
   assert.equal(visionSupportOf('mimo-v2.5-pro'), undefined, 'V2.5 的 pro 版不支持多模态')
 })
 
+test('OpenAI o 系列：只给官方确定可用的三档，且短 id 不会误伤别的模型', () => {
+  // 官方支持表对 codex-mini / o3-pro / o4-mini / o3 / o3-mini / o1 全标了
+  // 「Reasoning effort ✅」，但**没有逐型号列出枚举**。按官方那三条适用范围约束反推，
+  // o 系列唯一确定可用的是 low/medium/high：
+  //   none 不含 o 系列；minimal 只支持初代 GPT-5；xhigh/max 限定更新的型号。
+  const threeTiers = { low: 'low', medium: 'medium', high: 'high' }
+  for (const id of ['o1', 'o3', 'o3-mini', 'o4-mini', 'o3-pro']) {
+    assert.deepEqual(suggestEfforts(id), threeTiers, id + ' 应只有官方确定的三档')
+    assert.equal(Object.hasOwn(suggestEfforts(id), 'minimal'), false, id + ' 官方未确认 minimal')
+    assert.equal(Object.hasOwn(suggestEfforts(id), 'off'), false, id + ' 官方未确认 none')
+    assert.equal(Object.hasOwn(suggestEfforts(id), 'xhigh'), false, id + ' 官方未确认 xhigh')
+  }
+
+  // 官方脚注：`o1-mini` 不支持 reasoning_effort —— 要认得出，不能落进认不出家族。
+  assert.equal(suggestEfforts('o1-mini'), undefined)
+  assert.match(noEffortReason('o1-mini') ?? '', /不支持/)
+
+  // 官方脚注：`gpt-5-codex` 不支持 minimal。
+  assert.equal(Object.hasOwn(suggestEfforts('gpt-5-codex') ?? {}, 'minimal'), false)
+
+  // ★ 边界回归：`o1` / `o3` 只有两字符，裸子串会命中 `audio1`、`video3`、`ratio1`
+  // 这些**完全无关**的模型 id，并给它们写进一组不支持的档位。
+  // 这正是加词边界的原因，必须钉住。
+  for (const id of ['audio1', 'video3', 'ratio1', 'vision3', 'llama-audio1']) {
+    assert.equal(suggestEfforts(id), undefined, id + ' 不该被 o1/o3 误伤')
+    assert.equal(noEffortReason(id), undefined, id + ' 不该被 o1/o3 误伤')
+    assert.equal(visionSupportOf(id), undefined, id + ' 不该被 o1/o3 误伤')
+  }
+
+  // 但合法的分隔形式必须照常命中。
+  for (const id of ['gpt-o3', 'openai/o3', 'o3-preview']) {
+    assert.notEqual(suggestEfforts(id), undefined, id + ' 应正常命中 o3')
+  }
+})
+
+test('短模式需词边界，但长模式保持宽松子串语义', () => {
+  // 短模式（<4 字符）要落在分隔符边界上。
+  assert.equal(suggestEfforts('audio1'), undefined)
+  assert.equal(suggestEfforts('video3'), undefined)
+  // 长模式仍是纯子串 —— 这是带版本号/渠道前缀的 id 需要的宽松匹配。
+  // `gpt-5.1-codex-max` 官方 id 带后缀，中转站常写成 `openai/gpt-5.1-codex-max`。
+  assert.notEqual(suggestEfforts('openai/gpt-5.1-codex-max'), undefined, '长模式应宽松命中')
+  assert.notEqual(suggestEfforts('some-prefix-glm-5.2'), undefined, '长模式应宽松命中')
+})
+
 test('Kimi 新模型：kimi-for-coding 有档位，而 highspeed 版本不被它盖住', () => {
   const threeTiers = { low: 'low', high: 'high', max: 'max' }
 
