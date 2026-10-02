@@ -170,10 +170,30 @@ Grok 的旧型号同理：`grok-4`（含 `-fast` / `-1-fast` / `-0709`）、`gro
 | OpenAI `gpt-5.1` | 同上但**无** `xhigh` | ✅ | 同上 |
 | OpenAI 初代 `gpt-5*` | `minimal` / `low` / `medium` / `high`（**无** `none`） | ❌ | 同上 |
 | OpenAI `gpt-5-pro` | **仅 `high`** | ❌ | 同上 |
+| OpenAI `o1` / `o3` / `o3-mini` / `o4-mini` / `o3-pro` | `low` / `medium` / `high`（官方未逐型号列枚举，按适用范围反推） | ❌ | 同上 |
 | Anthropic `claude-fable-5` / `mythos-5` / `opus-5` / `sonnet-5` | `low` / `medium` / `high` / `xhigh` / `max` | Fable/Mythos ❌；Opus 5/Sonnet 5 ✅ | Anthropic 官方 SDK |
 | Google Gemini | `minimal` / `low` / `medium` / `high`（`thinking_level`） | 官方未说明 | Google 官方 SDK |
+| **Mistral** `mistral-medium-3*` / `magistral*` | `none` / `minimal` / `low` / `medium` / `high` / `xhigh`（**无 `max`**） | ✅ 可关 | Mistral 官方 SDK |
+| **字节豆包** `doubao-seed-*` | `none` / `minimal` / `low` / `medium` / `high` / `xhigh` / `max`（七档全收） | ✅ 可关 | 火山方舟官方文档 |
+| **阶跃 Step** `step-5*` / `step-3.7*` / `step-3.5*` | `low` / `medium` / `high` | ❌ 官方无关闭方式 | 阶跃官方文档 |
 
-**两处刻意不写，都是为了避免「看起来能选、实际被拒」：**
+**刻意不写档位（官方确认不支持，登记原因避免被通用模板误补）：**
+
+| 厂商 | 模型 | 官方依据 |
+|---|---|---|
+| **Meta Llama** | 全系（`llama-4-scout` / `-maverick` / `llama-3.3-70b` …） | 官方 Python / TypeScript SDK 参数表**无 `reasoning_effort`**；`CoreModelId` 枚举无任何推理变体 |
+| **百度 ERNIE** | 全系 | 官方 `reasoning_effort` 支持清单**只有 deepseek 系**；ERNIE 用 `enable_thinking` 开关 |
+| **Mistral** | `mistral-large-3` | 官方模型卡 output 仅 `text`、**未标 reasoning**，档位未按模型确认 |
+| 智谱 | `glm-4.x` / `glm-5.1` / `glm-5` / `glm-image` / `glm-ocr` | 官方明确「仅 5.2 及以上支持」 |
+| 月之暗面 | `kimi-k2.6` / `kimi-k2.7-code*` / `kimi-for-coding-highspeed` | 只有 thinking 开关 |
+| 小米 | `mimo-v2.5*` / `mimo-v2.6*` | 只有 thinking 开关 |
+| 腾讯 | `hy4*` / `hy-mt2*` / `hy-role` | 官方未公布档位枚举 |
+| 阿里 | `qwen3.7-*` | 官方未公布档位枚举 |
+| xAI | `grok-4*`（旧）/ `grok-3*` / `grok-2*` | 官方明确不支持 |
+| OpenAI | `o1-mini` | 官方脚注明确不支持 |
+| Anthropic | `claude-opus-4-8` / `claude-haiku-4-5` | 官方只标 "Reasoning: Supported"，未公布枚举 |
+
+**四处刻意不写，都是为了避免「看起来能选、实际被拒」：**
 
 1. **OpenAI 的 `max` 一个都不写**。官方原文限定：`max` 只在 GPT-6 或 GPT-5.6 **且用
    Responses API** 时可用。本插件服务的路由是 OpenAI 兼容的 `openai-completions`
@@ -182,10 +202,17 @@ Grok 的旧型号同理：`grok-4`（含 `-fast` / `-1-fast` / `-0709`）、`gro
 2. **Anthropic 的 `off` 不写**。Anthropic 关闭思考是 `thinking: {"type":"disabled"}`，
    它**不是** effort 的一个档位值。写成 `off` 会让 DSH 显示一个「关闭思考」选项，
    而实际效果只是不发 effort 字段、思考照旧按默认开启 —— 那是误导。
+3. **阶跃的 `off` 不写**：官方文档完全没有 thinking / enable_thinking 字段，无关闭方式。
+4. **Mistral 的 `mistral-large-3` 不写档位**：官方模型卡 output 仅 `text`、未标 `reasoning`，
+   且官方**未按模型声明**档位子集（六档枚举是 API 层联合类型，不等于每个模型都支持）。
 
 另外两处「官方没写就不猜」：`claude-opus-4-8` / `claude-haiku-4-5` 官方只标
 "Reasoning: Supported" 而**未公布档位枚举**，插件登记为刻意不写；**Gemini 的上下文窗口与
 最大输出一个数字都没取到**，所以只写档位、不写规格。
+
+**豆包只认 `doubao-seed-*`**：`doubao-pro` / `doubao-1.5-pro` 不在方舟官方模型列表里，
+也不在 reasoning_effort 支持表中 —— 插件**刻意不写宽泛的 `doubao` 前缀**，
+因为那等于凭厂商名猜能力。
 
 **OpenAI o 系列**（`o1` / `o3` / `o3-mini` / `o4-mini` / `o3-pro`）：官方支持表只标了
 「Reasoning effort ✅」而**未逐型号列出枚举**。插件按官方给的三条适用范围约束反推，
@@ -218,8 +245,9 @@ node scripts/coverage-report.mjs
 所以这个数字就是插件的实际能力缺口。
 
 已知仍认不出的（官方数据未取得，按「认不出就不写」处理）：
-Meta Llama 全系、Mistral 除 `mistral-large-3`（已补规格）外、Cohere Command、
-百度 ERNIE、字节豆包、阶跃 Step，以及 `phi-4` 等。
+Cohere Command、Mistral `devstral-2` / `leanstral` / `mistral-small-4-0`、
+`doubao-pro`（官方列表无此 id）、`phi-4` 等。截至 2026-10-03 第二轮核对，
+74 个样本中仅 4 个认不出 —— 都是有依据的「官方没写就不猜」，而非遗漏。
 
 ### Grok 的档位随版本变（改表时务必留意）
 
@@ -337,7 +365,7 @@ DSH 实现做 20 项静态契约断言（含「`settings.get()` 必须不存在�
 `__ModuleLoader__` bundle）都是可直接运行的产物。
 
 ```sh
-node --test test/host.test.mjs test/client.test.mjs test/scripts.test.mjs   # 75 项
+node --test test/host.test.mjs test/client.test.mjs test/scripts.test.mjs   # 80 项
 node test/cordis-smoke.mjs                            # 真实 cordis 冒烟
 node test/real-settings-smoke.mjs                     # 真实 settings 形状下的端到端
 node test/contract-0.2.mjs                            # 真实 DSH 0.2 契约核对（20 项）
@@ -358,10 +386,13 @@ node test/contract-0.2.mjs                            # 真实 DSH 0.2 契约核
   **0.2 适配部分（6 项）**：无 `settings.get` 时照常工作、`value`/`user` 分层读取、
   `inputModalities` 优先于内置表、无模态时退回内置表、发现失败仍兜底、
   缺 `settings` 服务时端点回可读原因。
-  **新模型规则部分（7 项）**：OpenAI 档位随型号收窄且不写只在 Responses API 可用的 `max`、
+  **新模型规则部分（11 项）**：OpenAI 档位随型号收窄且不写只在 Responses API 可用的 `max`、
   `gpt-5-pro` 只有 `high` 且 `gpt-5.1-codex-max` 独有 `xhigh`、Anthropic 五档含 `xhigh`
   但不写 `off`、Gemini 只有官方四档、小米 V2.6 无档位且两代多模态能力分布相反、
-  OpenAI o 系列只给官方确定的三档、短 id 需词边界（`o1`/`o3` 不误伤 `audio1`/`video3`）。
+  OpenAI o 系列只给官方确定的三档、短 id 需词边界（`o1`/`o3` 不误伤 `audio1`/`video3`）、
+  Meta Llama 官方无该参数、百度 ERNIE 只有 enable_thinking 开关、
+  阶跃三档且无关闭方式（含 `step-3` 下线的子串冲突）、豆包七档但只认官方在架的 `doubao-seed` 系、
+  Mistral 六档（无 `max`）且只给官方标记 reasoning 的型号。
 - `test/client.test.mjs`：执行 `lib/client.js`，验证 bundle 契约（以包名注册、
   只依赖平台播种表内的 react）与 `settings.section` 的注册形状。
 - `test/scripts.test.mjs`（10 项）：`scripts/fix-efforts.mjs` 的参数解析与安全阀。

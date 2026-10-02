@@ -909,7 +909,8 @@ test('OpenAI o 系列：只给官方确定可用的三档，且短 id 不会误�
   // ★ 边界回归：`o1` / `o3` 只有两字符，裸子串会命中 `audio1`、`video3`、`ratio1`
   // 这些**完全无关**的模型 id，并给它们写进一组不支持的档位。
   // 这正是加词边界的原因，必须钉住。
-  for (const id of ['audio1', 'video3', 'ratio1', 'vision3', 'llama-audio1']) {
+  // （样本刻意不用 `llama-*` 前缀：`llama` 是真实登记过的家族，命中它是正确行为。）
+  for (const id of ['audio1', 'video3', 'ratio1', 'vision3', 'gpt-audio1']) {
     assert.equal(suggestEfforts(id), undefined, id + ' 不该被 o1/o3 误伤')
     assert.equal(noEffortReason(id), undefined, id + ' 不该被 o1/o3 误伤')
     assert.equal(visionSupportOf(id), undefined, id + ' 不该被 o1/o3 误伤')
@@ -929,6 +930,75 @@ test('短模式需词边界，但长模式保持宽松子串语义', () => {
   // `gpt-5.1-codex-max` 官方 id 带后缀，中转站常写成 `openai/gpt-5.1-codex-max`。
   assert.notEqual(suggestEfforts('openai/gpt-5.1-codex-max'), undefined, '长模式应宽松命中')
   assert.notEqual(suggestEfforts('some-prefix-glm-5.2'), undefined, '长模式应宽松命中')
+})
+
+/**
+ * 2026-10-03 第二轮查证补入的厂商 —— 来源都是厂商官方一手产物。
+ */
+test('Meta Llama：官方无 reasoning_effort，登记为刻意不写', () => {
+  // 依据是 Meta 官方 Python / TypeScript SDK 的完整参数表：既无 reasoning_effort，
+  // 也无任何推理字段；官方 CoreModelId 枚举穷举全部 SKU，不存在 reasoning 变体。
+  for (const id of ['llama-4-scout', 'llama-4-maverick', 'llama-3.3-70b', 'meta/llama-4-scout']) {
+    assert.equal(suggestEfforts(id), undefined, id + ' 不该给档位')
+    assert.notEqual(noEffortReason(id), undefined, id + ' 必须被认得出（否则会诱导通用模板写入）')
+  }
+  // 官方未公开最大输出，所以不该凭空写数字 —— 这里只验证它能被认得出。
+  assert.match(noEffortReason('llama-4-scout') ?? '', /无 reasoning_effort/)
+})
+
+test('百度 ERNIE：只有 enable_thinking 开关，无档位枚举', () => {
+  // 官方千帆文档的 reasoning_effort 支持清单只有 deepseek 系，ERNIE 全系不在其中。
+  for (const id of ['ernie-5.0', 'ernie-5.1', 'ernie-5.0-thinking-preview']) {
+    assert.equal(suggestEfforts(id), undefined)
+    assert.match(noEffortReason(id) ?? '', /enable_thinking/)
+  }
+})
+
+test('阶跃 Step：官方三档且无关闭方式；step-3 已下线', () => {
+  const threeTiers = { low: 'low', medium: 'medium', high: 'high' }
+  for (const id of ['step-5-preview', 'step-3.7-flash', 'step-3.5-flash']) {
+    assert.deepEqual(suggestEfforts(id), threeTiers, id + ' 应只有官方三档')
+    // 官方文档完全没有 thinking / enable_thinking 字段，也没有 none 档。
+    assert.equal(Object.hasOwn(suggestEfforts(id), 'off'), false, id + ' 官方无关闭推理方式，不该写 off')
+  }
+  // 官方 API 参考里 `step-3.5-flash-2603` 只有 low/high 两档。
+  assert.deepEqual(suggestEfforts('step-3.5-flash-2603'), { low: 'low', high: 'high' })
+
+  // step-3 已于 2026-07-08 下线，要认得出并给出替代品。
+  assert.equal(suggestEfforts('step-3'), undefined)
+  assert.match(noEffortReason('step-3') ?? '', /下线/)
+  // 子串冲突：`step-3` 是 `step-3.7` / `step-3.5` 的前缀，但前者已下线、后者有档位 ——
+  // 靠最长命中区分，不能互相污染。
+  assert.notEqual(suggestEfforts('step-3.7-flash'), undefined, 'step-3.7 不该被 step-3 的规则命中')
+  assert.notEqual(suggestEfforts('step-3.5-flash'), undefined, 'step-3.5 不该被 step-3 的规则命中')
+})
+
+test('字节豆包：官方七档且可关闭；但只认官方在架的 doubao-seed 系', () => {
+  const sevenTiers = { off: 'none', minimal: 'minimal', low: 'low', medium: 'medium', high: 'high', xhigh: 'xhigh', max: 'max' }
+  assert.deepEqual(suggestEfforts('doubao-seed-2-1-pro-260915'), sevenTiers)
+  assert.deepEqual(suggestEfforts('doubao-seed-evolving'), sevenTiers)
+
+  // ★ 刻意不写宽泛的 `doubao` 前缀：`doubao-pro` / `doubao-1.5-pro` 不在方舟官方
+  // 模型列表里，也不在 reasoning_effort 支持表中。给它们套七档等于凭厂商名猜能力。
+  for (const id of ['doubao-pro', 'doubao-1.5-pro']) {
+    assert.equal(suggestEfforts(id), undefined, id + ' 官方列表无此 id，不该凭厂商名给档位')
+  }
+})
+
+test('Mistral：官方六档（无 max），但只给官方标记 reasoning 的型号', () => {
+  // 官方 SDK 生成代码里 ReasoningEffort 的联合类型：
+  // none | minimal | low | medium | high | xhigh —— **没有 max**。
+  const sixTiers = { off: 'none', minimal: 'minimal', low: 'low', medium: 'medium', high: 'high', xhigh: 'xhigh' }
+  for (const id of ['mistral-medium-3', 'mistral-medium-3-5', 'magistral-medium']) {
+    assert.deepEqual(suggestEfforts(id), sixTiers, id + ' 应与官方六档枚举一致')
+    assert.equal(Object.hasOwn(suggestEfforts(id), 'max'), false, 'Mistral 官方枚举没有 max')
+  }
+
+  // `mistral-large-3` 官方模型卡 output 仅 text、**未标记 reasoning**，
+  // 且官方未按模型声明档位子集 —— 按「官方没按模型确认就不写」处理，
+  // 但要认得出（否则会被通用模板补上未确认的档位）。
+  assert.equal(suggestEfforts('mistral-large-3'), undefined)
+  assert.notEqual(noEffortReason('mistral-large-3'), undefined)
 })
 
 test('Kimi 新模型：kimi-for-coding 有档位，而 highspeed 版本不被它盖住', () => {

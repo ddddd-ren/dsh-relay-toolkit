@@ -444,27 +444,131 @@ DSH 0.2 起配置**不在 `~/.dsh/settings.yaml`**（旧文件会被一次性导
 `embedding-3`（向量）等**非对话模型**不在本插件的适用范围内：它们没有 `reasoningEffort` 与
 `contextWindow` 语义，插件也不会给它们写任何字段。
 
+### Meta Llama（**厂商官方一手来源**，2026-10-03 补入）
+
+**官方没有 `reasoning_effort` 参数。** 依据是 Meta 官方两份 SDK 的完整参数表
+（Python 与 TypeScript 完全一致）：`messages` / `model` / `max_completion_tokens` /
+`repetition_penalty` / `response_format` / `stream` / `temperature` / `tool_choice` /
+`tools` / `top_k` / `top_p` / `user` —— 既无 `reasoning_effort`，也无任何推理相关字段。
+官方 `CoreModelId` 枚举穷举全部 SKU（llama2 / 3 / 3.1 / 3.2 / 3.3 / 4 / safety），
+**不存在任何 reasoning / thinking 变体**。
+
+| 模型 id | 上下文 | 最大输出 | 档位 |
+|---|---|---|---|
+| `llama-4-scout`（instruct） | **10,485,760** | 未找到官方数据 | 无 |
+| `llama-4-maverick`（instruct） | **1,048,576** | 未找到官方数据 | 无 |
+| `llama-3.3-70b` | **131,072** | 未找到官方数据 | 无 |
+
+注意 base（非 instruct）变体的 Scout / Maverick 上下文均为 **262,144**，与 instruct 不同。
+**最大输出官方未公开** —— 官方 SDK 只有 `max_completion_tokens` 参数本身，
+模型卡与 `sku_types.py` 都没有上限数字，故插件刻意留空。
+
+多模态：官方 `sku_types.py` 的 `is_multimodal()` **只对 Llama 3.2 的 11B / 90B Vision 返回 true**。
+Llama 4 虽在模型卡里提到多模态，但 `is_multimodal()` 未列入，插件按「官方没明确写就不补」不登记。
+
+来源：<https://raw.githubusercontent.com/meta-llama/llama-models/main/models/sku_types.py>、
+<https://raw.githubusercontent.com/meta-llama/llama-api-python/main/src/llama_api_client/types/chat/completion_create_params.py>
+
+### Mistral（**厂商官方一手来源**）
+
+**官方 `reasoning_effort` 枚举（6 档）**：`none` / `minimal` / `low` / `medium` / `high` / `xhigh`
+—— **没有 `max`**（与 OpenAI、Anthropic 都不同）。另有独立开关 `prompt_mode`，枚举仅 `"reasoning"`。
+
+**重要限定**：这是 **API 层面的联合类型**，官方**未按模型声明**每个模型支持哪几档。
+所以插件只对官方模型卡明确标记了 `reasoning` 输出模态的型号声明档位：
+
+| 模型 | 上下文 | output 模态 | 插件是否写档位 |
+|---|---|---|---|
+| `mistral-medium-3` / `-3-5` / `-latest`（3.5, 26.04） | 256k | `reasoning` + `text` | ✅ 六档 |
+| `magistral-medium-latest`（1.2, 25-09） | 128k | `reasoning` + `text` | ✅ 六档（**已弃用**，2026-05-22 弃用 / 2026-07-31 退役） |
+| `mistral-large-3` / `-latest`（2512） | 256k | 仅 `text`，**未标 reasoning** | ❌ 刻意不写 |
+
+补充官方状态：`magistral-medium` 1.1（40k）已 **Retired**；`magistral-small` 1.2（128k）
+Deprecated（替代品 Mistral Small 4）；`mistral-medium-3`（25-05）与 3.1（25-08）均 128k 且 Deprecated。
+更新型号：`mistral-medium-3-5`、`mistral-small-4-0`、`devstral-2`、`leanstral`。
+
+**最大输出官方未公开**：官方模型卡 schema 定义了 `outputTokenLimit` 字段，但逐一读取的
+型号定义（large-3、medium-3.5、magistral-medium 1.1/1.2、magistral-small 1.2、medium-3/3.1）
+**均未填写该字段**。
+
+> ⚠️ 「Magistral 只有 thinking 开关」**无法从官方来源证实** —— 官方模型卡只把 output 模态
+> 标为 `reasoning` + `text`，既未确认也未否认按模型的档位支持。插件不采用这个说法。
+
+来源：<https://raw.githubusercontent.com/mistralai/client-python/main/src/mistralai/client/models/reasoningeffort.py>、
+<https://github.com/mistralai/platform-docs-public/tree/main/src/schema/models>
+
+### 百度 ERNIE（厂商官方千帆文档）
+
+官方**确实有** `reasoning_effort` 参数，但**支持清单只有 `deepseek-v4-pro` / `deepseek-v4-flash`**
+（国内站；国际站仅 `gpt-oss-120b/20b`）。**ERNIE 全系不在其中**。
+
+| 模型 | 上下文 | 最大输出 | 推理控制 |
+|---|---|---|---|
+| `ernie-5.0` | 128k（最大输入 119k） | 65,536 | 无 reasoning_effort |
+| `ernie-5.0-thinking-preview` | 128k（119k） | 65,536 | `enable_thinking: false` 可关（默认 true）；`thinking_budget`（最小 100） |
+| `ernie-5.1`（旗舰） | 128k | 64k | 无 |
+
+`ernie-5.0-turbo` **官方模型列表无此 id**，插件无规则。
+来源：<https://cloud.baidu.com/doc/qianfan-docs/s/7m95lyy43>
+
+### 字节豆包 Doubao（火山方舟官方文档）
+
+`reasoning_effort`（Chat API）/ `reasoning.effort`（Responses API）官方支持，**七档**：
+`none` / `minimal` / `low` / `medium` / `high` / `xhigh` / `max`。
+官方原文：「所有支持该字段的模型均接受全部 7 档取值，部分取值将按表中规则自动映射至等效档位。」
+默认值：`doubao-seed-2-1-*` 与 `doubao-seed-evolving` 为 `high`；`doubao-seed-2-0-*`、`doubao-seed-character` 为 `medium`。
+关闭推理：`reasoning_effort: none/minimal`，或旧混合模型的 `thinking.type`（enabled/disabled/auto）。
+
+⚠️ **官方模型列表按不同接入方式（在线推理 / 批量推理等）给同一模型列出多组上下文与输出规格**
+（如 1024k 或 256k），插件取较大一组，但这**不是单一定值** —— 真实可用上限取决于接入方式。
+
+**`doubao-pro` / `doubao-1.5-pro` 不在方舟官方模型列表里**，也不在 reasoning_effort 支持表中，
+所以插件**刻意不写宽泛的 `doubao` 前缀**（那等于凭厂商名猜能力），只认 `doubao-seed-*`。
+
+来源：<https://docs.volcengine.com/docs/82379/1449737>（该站为 JS 渲染，
+正文经其内容接口 `/api/doc/getDocDetail` 取得，并与字节国际站英文版逐条交叉验证一致）
+
+### 阶跃星辰 Step（厂商官方文档）
+
+`reasoning_effort` 官方支持，**标准三档 `low` / `medium` / `high`**
+（`step-3.5-flash-2603` 在官方 API 参考里只有 `low` / `high`）。
+Messages API 对应 `output_config.effort`。
+
+**官方文档完全没有 thinking / enable_thinking 字段**，即**无官方关闭推理方式**，也不支持 `none` ——
+所以插件只写三档、不写 `off`。
+
+| 模型 | 上下文 | 最大输出 | 档位 |
+|---|---|---|---|
+| `step-5-preview`（旗舰） | 1M | 64k | low/medium/high |
+| `step-3.7-flash` | 256K | 官方未列上限（`max_tokens` 默认 `INF` 不限制） | low/medium/high |
+| `step-3.5-flash` | 256K | 同上 | low/medium/high |
+| `step-3.5-flash-2603` | — | — | 仅 low/high |
+| `step-3` | **已于 2026-07-08 下线** | — | — |
+
+`step-5-preview` 原生支持文本 / 图片 / 视频输入（单次最多 60 张图），插件已登记多模态。
+来源：<https://platform.stepfun.com/docs/zh/guides/models/step-5-preview>
+
 ### 仍未取得官方数据的厂商
 
-**Google Gemini**：官方 SDK 已给出 `thinking_level` 四档枚举（插件据此写入），但
+**Google Gemini**：官方 SDK 已给出 `thinking_level` 四档枚举（插件据此写入档位），但
 **上下文窗口与最大输出一个数字都没取到**（`ai.google.dev`、`cloud.google.com`、
 `docs.cloud.google.com`、`generativelanguage.googleapis.com` 全部抓取失败，
 `r.jina.ai` 代理亦失败）。所以插件**不给 Gemini 写规格**，只写档位。
 
-**Meta Llama**：`llama-4-scout` / `llama-4-maverick` / `llama-3.3-70b` 均未取得官方档位数据，
-插件无规则（认不出就不写）。本轮曾派查证任务但未返回结果，**未完成**。
-
-**Mistral**：仅 `mistral-large-3` 取得 Bedrock 官方模型卡的规格（256K / 32K），
-档位未提故不写；`mistral-medium-3` / `magistral-medium` 未查证。
-
 **Cohere**：`docs.cohere.com` 的 Reasoning 与 Command A Reasoning 页面均可访问，
 但**正文被导航结构占满、未取到实质档位内容**，故不收录。
 
-**国产厂商**：百度 ERNIE（`ernie-5.0`）、字节豆包（`doubao-pro`）、阶跃 Step（`step-3`）
-本轮未查证（派出的查证任务未返回结果），插件无规则。
+**Mistral 的部分型号**：`devstral-2`、`leanstral`、`mistral-small-4-0` 本轮未取到档位数据。
+
+**Meta 的最大输出**：官方未公开（见上）。
+
+**国产其他**：`doubao-pro` / `doubao-1.5-pro`（官方列表无此 id）、`phi-4` 等无规则。
 
 ### 覆盖度自查
 
 改完规则表后跑 `node scripts/coverage-report.mjs`：它打印三张表的全部规则，
 并用一批覆盖国内外主流厂商的代表性 id 实测判定，最后给出「认不出」的数量。
-截至 2026-10-03，66 个样本中 13 个认不出（即上列未取得官方数据的厂商）。
+
+截至 2026-10-03 第二轮核对：**74 个样本中仅 4 个认不出**
+（Cohere `command-a`、Mistral `devstral-2`、`doubao-pro`、`phi-4`）——
+都是有依据的「官方没写就不猜」，而非遗漏。

@@ -64,9 +64,11 @@ const SAMPLES = {
   OpenAI: ['gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.5', 'gpt-5.1', 'gpt-5-pro', 'gpt-5'],
   Anthropic: ['claude-fable-5', 'claude-opus-5', 'claude-sonnet-5', 'claude-opus-4-8', 'claude-haiku-4-5'],
   Google: ['gemini-3-pro', 'gemini-3-flash', 'gemini-2.5-pro'],
-  Meta: ['llama-4-scout', 'llama-4-maverick', 'llama-3.3-70b'],
-  Mistral: ['mistral-large-3', 'mistral-medium-3', 'magistral-medium'],
-  DeepSeek以外的国产: ['ernie-5.0', 'doubao-pro', 'step-3', 'glm-4.6'],
+  Meta: ['llama-4-scout', 'llama-4-maverick', 'llama-3.3-70b', 'meta/llama-4-scout'],
+  Mistral: ['mistral-large-3', 'mistral-medium-3-5', 'magistral-medium', 'devstral-2'],
+  百度: ['ernie-5.0', 'ernie-5.1', 'ernie-5.0-thinking-preview'],
+  字节豆包: ['doubao-seed-2-1-pro-260915', 'doubao-seed-evolving', 'doubao-pro'],
+  阶跃: ['step-5-preview', 'step-3.7-flash', 'step-3.5-flash', 'step-3'],
   其他: ['o3', 'o4-mini', 'command-a', 'phi-4']
 }
 
