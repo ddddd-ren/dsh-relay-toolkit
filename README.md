@@ -160,6 +160,33 @@ Grok 的旧型号同理：`grok-4`（含 `-fast` / `-1-fast` / `-0709`）、`gro
 `grok-3*`、`grok-2*` 官方都明确不支持 `reasoning_effort`（`grok-4` 始终以固定档位推理；
 `grok-3` 只有 mini 变体有档位，而该家族已于 2026-05-15 整体重定向到 `grok-4.3`）。
 
+### 国外厂商的档位（2026-10-03 补入）
+
+上一轮核对时国外厂商官方域全部不可达，本轮部分已能取到官方数据，故补入规则：
+
+| 厂商 | 官方档位 | 能否关闭推理 | 来源性质 |
+|---|---|---|---|
+| OpenAI `gpt-6*` / `gpt-5.6*` / `5.5` / `5.4` / `5.1-codex-max` | `none` / `low` / `medium` / `high` / `xhigh` | ✅ 可关（`none`） | Azure OpenAI 官方文档（云平台口径） |
+| OpenAI `gpt-5.1` | 同上但**无** `xhigh` | ✅ | 同上 |
+| OpenAI 初代 `gpt-5*` | `minimal` / `low` / `medium` / `high`（**无** `none`） | ❌ | 同上 |
+| OpenAI `gpt-5-pro` | **仅 `high`** | ❌ | 同上 |
+| Anthropic `claude-fable-5` / `mythos-5` / `opus-5` / `sonnet-5` | `low` / `medium` / `high` / `xhigh` / `max` | Fable/Mythos ❌；Opus 5/Sonnet 5 ✅ | Anthropic 官方 SDK |
+| Google Gemini | `minimal` / `low` / `medium` / `high`（`thinking_level`） | 官方未说明 | Google 官方 SDK |
+
+**两处刻意不写，都是为了避免「看起来能选、实际被拒」：**
+
+1. **OpenAI 的 `max` 一个都不写**。官方原文限定：`max` 只在 GPT-6 或 GPT-5.6 **且用
+   Responses API** 时可用。本插件服务的路由是 OpenAI 兼容的 `openai-completions`
+   （走 Chat Completions），写了就是必然被拒的档位。
+   （注意这与 Claude 的 `max` 无关 —— 后者是 Anthropic 自己的 effort 枚举。）
+2. **Anthropic 的 `off` 不写**。Anthropic 关闭思考是 `thinking: {"type":"disabled"}`，
+   它**不是** effort 的一个档位值。写成 `off` 会让 DSH 显示一个「关闭思考」选项，
+   而实际效果只是不发 effort 字段、思考照旧按默认开启 —— 那是误导。
+
+另外两处「官方没写就不猜」：`claude-opus-4-8` / `claude-haiku-4-5` 官方只标
+"Reasoning: Supported" 而**未公布档位枚举**，插件登记为刻意不写；**Gemini 的上下文窗口与
+最大输出一个数字都没取到**，所以只写档位、不写规格。
+
 ### Grok 的档位随版本变（改表时务必留意）
 
 Grok 是这张表里唯一「**同家族不同版本档位不同、且能不能关闭推理也变**」的情况：
@@ -276,7 +303,7 @@ DSH 实现做 20 项静态契约断言（含「`settings.get()` 必须不存在�
 `__ModuleLoader__` bundle）都是可直接运行的产物。
 
 ```sh
-node --test test/host.test.mjs test/client.test.mjs test/scripts.test.mjs   # 64 项
+node --test test/host.test.mjs test/client.test.mjs test/scripts.test.mjs   # 73 项
 node test/cordis-smoke.mjs                            # 真实 cordis 冒烟
 node test/real-settings-smoke.mjs                     # 真实 settings 形状下的端到端
 node test/contract-0.2.mjs                            # 真实 DSH 0.2 契约核对（20 项）
@@ -297,6 +324,9 @@ node test/contract-0.2.mjs                            # 真实 DSH 0.2 契约核
   **0.2 适配部分（6 项）**：无 `settings.get` 时照常工作、`value`/`user` 分层读取、
   `inputModalities` 优先于内置表、无模态时退回内置表、发现失败仍兜底、
   缺 `settings` 服务时端点回可读原因。
+  **新模型规则部分（5 项）**：OpenAI 档位随型号收窄且不写只在 Responses API 可用的 `max`、
+  `gpt-5-pro` 只有 `high` 且 `gpt-5.1-codex-max` 独有 `xhigh`、Anthropic 五档含 `xhigh`
+  但不写 `off`、Gemini 只有官方四档、小米 V2.6 无档位且两代多模态能力分布相反。
 - `test/client.test.mjs`：执行 `lib/client.js`，验证 bundle 契约（以包名注册、
   只依赖平台播种表内的 react）与 `settings.section` 的注册形状。
 - `test/scripts.test.mjs`（10 项）：`scripts/fix-efforts.mjs` 的参数解析与安全阀。

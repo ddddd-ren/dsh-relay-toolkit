@@ -790,6 +790,102 @@ test('Grok：子串冲突下最长命中优先，4.x 不被 4 盖住', () => {
   assert.notEqual(noEffortReason('grok-4'), undefined)
 })
 
+/**
+ * 国外厂商与小米新模型的档位回归 —— 来源是 2026-10-03 的官方核对。
+ *
+ * 这一轮的意义：上一轮（2026-09-16）记录「国外厂商全部不可达」，
+ * 本轮 OpenAI（Azure 官方文档）与 Anthropic（Bedrock 官方模型卡）都取到了
+ * 逐型号的官方能力表，所以补入规则；Google Gemini 仍不可达，故不写规格。
+ */
+test('OpenAI：档位随型号收窄，且刻意不写只在 Responses API 可用的 max', () => {
+  // GPT-6 / 5.6 / 5.5 / 5.4：官方支持 none 与 xhigh。
+  const withXhigh = { off: 'none', low: 'low', medium: 'medium', high: 'high', xhigh: 'xhigh' }
+  for (const id of ['gpt-6-astra', 'gpt-6-sol', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.5', 'gpt-5.4']) {
+    assert.deepEqual(suggestEfforts(id), withXhigh, id + ' 的档位应与官方表一致')
+  }
+
+  // 关键：OpenAI 的 `max` 官方限定「GPT-6 / 5.6 且用 Responses API」。
+  // 本插件服务的路由是 openai-completions，所以一个都不该写 max。
+  for (const id of ['gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.5']) {
+    assert.equal(
+      Object.hasOwn(suggestEfforts(id) ?? {}, 'max'),
+      false,
+      id + ' 的 max 只在 Responses API 下可用，Chat Completions 路由不该写'
+    )
+  }
+
+  // `minimal` 官方只支持**初代** GPT-5，5.1 及更高不支持。
+  assert.ok(Object.hasOwn(suggestEfforts('gpt-5'), 'minimal'), '初代 GPT-5 应有 minimal')
+  for (const id of ['gpt-5.1', 'gpt-5.5', 'gpt-5.6-sol', 'gpt-6-astra']) {
+    assert.equal(
+      Object.hasOwn(suggestEfforts(id) ?? {}, 'minimal'),
+      false,
+      id + ' 官方不支持 minimal'
+    )
+  }
+
+  // 初代 GPT-5 没有 none（官方 none 支持列表不含它），5.1+ 才有。
+  assert.equal(Object.hasOwn(suggestEfforts('gpt-5') ?? {}, 'off'), false, '初代 GPT-5 不支持 none')
+  assert.ok(Object.hasOwn(suggestEfforts('gpt-5.1') ?? {}, 'off'), 'gpt-5.1 支持 none')
+})
+
+test('OpenAI：gpt-5-pro 只支持 high，gpt-5.1-codex-max 拿到 xhigh', () => {
+  // 官方特例：`gpt-5-pro` 只支持 high（且它是默认值）。
+  assert.deepEqual(suggestEfforts('gpt-5-pro'), { high: 'high' })
+  // 官方：`gpt-5.1-codex-max` 是 5.1 系里唯一有 xhigh 的。
+  assert.ok(Object.hasOwn(suggestEfforts('gpt-5.1-codex-max'), 'xhigh'))
+  // 子串冲突：`gpt-5.1` 是 `gpt-5.1-codex-max` 的前缀，但两者档位不同 ——
+  // 靠最长命中区分，普通 5.1 不该拿到 xhigh。
+  assert.equal(Object.hasOwn(suggestEfforts('gpt-5.1') ?? {}, 'xhigh'), false, '普通 5.1 没有 xhigh')
+})
+
+test('Anthropic：官方 effort 枚举含 xhigh，但刻意不写 off', () => {
+  const fiveTiers = { low: 'low', medium: 'medium', high: 'high', xhigh: 'xhigh', max: 'max' }
+  for (const id of ['claude-fable-5', 'claude-mythos-5-1', 'claude-opus-5', 'claude-sonnet-5']) {
+    assert.deepEqual(suggestEfforts(id), fiveTiers, id + ' 的档位应与 Anthropic 官方枚举一致')
+  }
+
+  // 关键：Anthropic 关闭思考是 `thinking: {"type":"disabled"}`，**不是** effort 的一个值。
+  // 写成 off 会让界面显示一个名不副实的「关闭思考」。
+  for (const id of ['claude-fable-5', 'claude-opus-5', 'claude-sonnet-5']) {
+    assert.equal(
+      Object.hasOwn(suggestEfforts(id) ?? {}, 'off'),
+      false,
+      id + ' 的关闭思考不是 effort 档位，不该写 off'
+    )
+  }
+
+  // 官方未公布枚举的型号要认得出（否则会被通用模板补上无效档位）。
+  for (const id of ['claude-opus-4-8', 'claude-haiku-4-5']) {
+    assert.equal(suggestEfforts(id), undefined, id + ' 官方未公布枚举，不该给档位')
+    assert.notEqual(noEffortReason(id), undefined, id + ' 必须被认得出')
+  }
+})
+
+test('Gemini：用官方四档，且不写 Gemini 没有的 xhigh / max', () => {
+  const fourTiers = { minimal: 'minimal', low: 'low', medium: 'medium', high: 'high' }
+  for (const id of ['gemini-3-pro', 'gemini-3-flash']) {
+    assert.deepEqual(suggestEfforts(id), fourTiers, id + ' 应只有官方四档')
+    assert.equal(Object.hasOwn(suggestEfforts(id), 'xhigh'), false, 'Gemini 没有 xhigh')
+    assert.equal(Object.hasOwn(suggestEfforts(id), 'max'), false, 'Gemini 没有 max')
+  }
+})
+
+test('小米 MiMo V2.6：只有 thinking 开关，且两代多模态能力分布相反', () => {
+  // 官方「深度思考」页：只有 thinking.type 开关，无多档。
+  for (const id of ['mimo-v2.6-pro', 'mimo-v2.6-flash', 'mimo-v2.6-pro-ultraspeed']) {
+    assert.equal(suggestEfforts(id), undefined)
+    assert.match(noEffortReason(id) ?? '', /thinking/)
+  }
+
+  // 多模态：官方表里 V2.6 三款**都有**「全模态理解」（pro 也支持）；
+  // V2.5 只有非 pro 版有。两代分布相反，必须靠分开的规则区分。
+  assert.notEqual(visionSupportOf('mimo-v2.6-pro'), undefined, 'V2.6 的 pro 版支持全模态')
+  assert.notEqual(visionSupportOf('mimo-v2.6-flash'), undefined)
+  assert.notEqual(visionSupportOf('mimo-v2.5'), undefined)
+  assert.equal(visionSupportOf('mimo-v2.5-pro'), undefined, 'V2.5 的 pro 版不支持多模态')
+})
+
 test('Kimi 新模型：kimi-for-coding 有档位，而 highspeed 版本不被它盖住', () => {
   const threeTiers = { low: 'low', high: 'high', max: 'max' }
 

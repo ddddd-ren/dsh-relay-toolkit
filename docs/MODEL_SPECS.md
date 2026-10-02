@@ -1,10 +1,11 @@
 # 模型规格核对表
 
-> 核对日期：2026-09-16（2026-09-13 补充 Kimi Code 的 4 个 Model ID；2026-09-16 复核
-> 各厂商官方页，补入 Kimi K2.7 Code 高速版、腾讯 Hy-MT2 / Hy-Role、Qwen3.7-Flash 等新条目，
-> 并修正 DeepSeek V4-Pro 的生命周期结论）
-> 方法：只采信厂商官方来源（官方 API 文档、官方发布公告、云厂商官方模型表）；每个数值附来源 URL。
-> 查不到官方数值的一律标注「未找到官方数据」，不按模型名推测。
+> 核对日期：**2026-10-03**（本轮补入国外厂商与小米 V2.6；前几轮：2026-09-16 复核各厂商
+> 官方页并补入 Kimi K2.7 Code 高速版、腾讯 Hy-MT2 / Hy-Role、Qwen3.7-Flash 等；
+> 2026-09-13 补充 Kimi Code 的 4 个 Model ID；2026-10-02 补入 xAI Grok 全系档位）
+> 方法：只采信厂商官方来源（官方 API 文档、官方发布公告、官方 SDK 生成代码、云厂商官方模型卡）；
+> 每个数值附来源 URL，并**标明是厂商口径还是云平台口径**。查不到官方数值的一律标注
+> 「未找到官方数据」，不按模型名推测。
 >
 > 用途：给 `dsh-relay-toolkit` 的「对齐窗口与输出」提供 `discoverModels` 之外的参考值，
 > 并顺带发现配置里已退役、已过期或规格可疑的模型。
@@ -230,50 +231,122 @@ M2.7 及更早的 M 系列**没有**这类官方表述，一律不补。
 ## 小米 MiMo（官方文档 mimo.mi.com）
 
 来源：<https://mimo.mi.com/docs/zh-CN/quick-start/summary/model>、
-<https://mimo.xiaomi.com/mimo-v2-5-pro>
+<https://mimo.mi.com/docs/zh-CN/quick-start/usage-guide/text-generation/deep-thinking>、
+<https://mimo.mi.com/docs/zh-CN/updates/deprecate>
 
-| 模型 | 上下文窗口 | 最大输出 | 思考控制 |
-|---|---|---|---|
-| `mimo-v2.5` | **1M** | **128K** | 仅开关：`thinking.type` = `enabled`（默认）/`disabled`，无多档 |
-| `mimo-v2.5-pro` | **1M** | **128K** | 同上；思考模式下 `temperature`/`top_p` 不可自定义 |
+**2026-10-03 复核**：官方模型表已更新到 **V2.6 系列**（页面更新日期 2026-09-22）。
+
+| 模型 | 上下文窗口 | 最大输出 | 思考控制 | 多模态 |
+|---|---|---|---|---|
+| `mimo-v2.6-pro` | **1M** | **128K** | 仅开关：`thinking.type` = `enabled`（默认）/`disabled`，无多档 | **全模态理解** ✅ |
+| `mimo-v2.6-flash` | **1M** | **128K** | 同上 | **全模态理解** ✅ |
+| `mimo-v2.6-pro-ultraspeed` | **1M** | **128K** | 同上 | **全模态理解** ✅ |
+| `mimo-v2.5` | 1M | 128K | 同上 | 全模态理解 ✅ |
+| `mimo-v2.5-pro` | 1M | 128K | 同上；思考模式下 `temperature`/`top_p` 不可自定义 | **无**多模态理解 ❌ |
+
+⚠️ **下线公告（官方）**：`mimo-v2.5` 与 `mimo-v2.5-pro` 将于北京时间 **2026.10.21 10:00**
+下线，且**无系统替换模型**（到期直接报错，不会自动改路由）。请尽快切到 `mimo-v2.6-*`。
+
+**多模态差异（这是个真陷阱，两代分布相反）**：官方模型表里，
+**V2.6 三款都带「全模态理解」**（该能力单元格 rowspan 覆盖 pro / flash / pro-ultraspeed 三行）；
+而 **V2.5 只有非 pro 版有** —— `mimo-v2.5-pro` 只列了文本生成 / 深度思考。
+
+所以插件的多模态表**为两代各写一条规则**，不能合并成一个 `mimo-v2` 前缀：
+合并会让 V2.5 的 pro 版被错误地声明成能收图。V2.5 那条另带 `except`，排除
+`mimo-v2.5-pro`（文本）、`mimo-v2.5-asr`（语音识别）、`mimo-v2.5-tts*`（语音合成）——
+它们的最长命中长度都是 `mimo-v2.5`，单靠最长命中分不开。
+**改动那张表时必须保住这个排除**，否则会给这些专用模型错误地声明图像能力。
 
 注意：开源基座 MiMo-V2.5-Base / Pro-Base 是 **256K**，与 API 型号的 1M 不是一回事，别混用。
-
-**多模态差异（2026-09-16 复核，这是个真陷阱）**：官方模型表里，`mimo-v2.5` 的能力项含
-**「全模态理解」**，`mimo-v2.5-pro` **只列了文本生成 / 深度思考 / 流式 / 函数调用 / 结构化输出 / 联网搜索**
-—— **不含多模态理解**。官方「图片理解」文档的示例代码用的也正是 `model="mimo-v2.5"`。
-
-两者共享 `mimo-v2.5` 前缀，最长命中分不开（命中长度都是 `mimo-v2.5`），所以插件的多模态表
-给这条规则加了 `except`：`mimo-v2.5` 补图像声明，同前缀的 `mimo-v2.5-pro`（文本）、
-`mimo-v2.5-asr`（语音识别）、`mimo-v2.5-tts*`（语音合成）**都不补**。
-**改动那张表时必须保住这个排除**，否则会给这些专用模型错误地声明图像能力。
 
 另：`mimo-v2-pro`、`mimo-v2-omni`、`mimo-v2-flash`、`mimo-v2-tts` 已于 **2026-06-30 下线**。
 
 ---
 
-## 国外厂商（2026-09-16 复核：**仍然未能取得官方数值**）
+## 国外厂商（2026-10-03 复核：**部分已取得官方数据**）
 
-这一节必须连同限制一起读 —— 本轮复核的网络环境**依旧无法访问绝大多数国外厂商官方站点**，
-与 2026-09-11 那轮结论一致：
+上一轮（2026-09-16）记录「全部不可达」，本轮网络环境有变化，逐域实测结果：
 
-| 厂商 | 官方域状态（2026-09-16 实测） |
-|---|---|
-| OpenAI | `developers.openai.com/api/docs/models/compare` → **HTTP 403**（Cloudflare 拦截） |
-| Google | `ai.google.dev/gemini-api/docs/models` → **连接失败** |
-| Anthropic | `platform.claude.com/docs/...` → 被**跨域重定向**到 `www.anthropic.com`，正文取不到 |
-| xAI | `x.ai`、`docs.x.ai` 连接失败 |
-| Meta | `llama.com`、`ai.meta.com`、`huggingface.co` 连接失败 |
-| Mistral | `mistral.ai`、`docs.mistral.ai` 连接失败 |
+| 厂商 | 官方域状态（2026-10-03 实测） | 本轮结论 |
+|---|---|---|
+| OpenAI | `developers.openai.com` → **仍 HTTP 403**（Cloudflare）；但 **Azure/Microsoft Foundry 官方文档可达**，且其 markdown 源在官方 GitHub 仓库可直取 | ✅ 取到逐型号的档位与规格表 |
+| Anthropic | `platform.claude.com` → 跨域重定向到 `www.anthropic.com`（404）；`docs.claude.com` 与之形成重定向环。但 **`code.claude.com` 可达**，官方 SDK 的 GitHub 仓库亦可直取 | ✅ 取到官方 effort 枚举；规格取 Bedrock 卡 |
+| xAI | `docs.x.ai` 仍不可达；改用转载其规格的云厂商模型卡 | ✅ 已由 AWS / Oracle / Cloudflare 三方交叉核对（见 Grok 节） |
+| Google | `ai.google.dev`、`cloud.google.com`、`docs.cloud.google.com`、`generativelanguage.googleapis.com` **全部抓取失败**；`r.jina.ai` 代理亦失败 | ⚠️ 仅取到官方 SDK 的 `thinking_level` 枚举，**规格一个数字都没有** |
+| Meta / Mistral | 未重测 | 未取得 |
 
-所以**国外模型的上下文窗口 / 最大输出 / 思考档位，一律标注「未找到官方数据」**，不采信任何
-第三方站点流传的数字（例如 grok-4-fast 的"2M"、Gemini 的"2M"，均无官方佐证）。
-插件的多模态表同样一个国外模型都不收 —— 认不出就不写。
+### OpenAI（Azure / Microsoft Foundry 官方文档 —— **云平台口径**）
 
-唯一可读的间接来源是 **AWS Bedrock model card**（AWS 官方文档，**不是模型厂商官方**），它给出：
-`claude-fable-5-1` / `claude-mythos-5-1` / `claude-opus-5` / `claude-sonnet-5` = 1M 上下文 / 128K 输出；
-`claude-haiku-4-5` = 200K / 64K；`mistral-large-3` = 256K / 32K；`gpt-6-astra` = 1,050,000 / 128,000。
-**这些请当作云平台口径，不是厂商口径。**
+来源：<https://learn.microsoft.com/en-us/azure/ai-foundry/openai/how-to/reasoning>
+（官方 markdown 源：<https://raw.githubusercontent.com/MicrosoftDocs/azure-ai-docs/main/articles/foundry/openai/how-to/reasoning.md>）
+
+**档位枚举**：`none` / `minimal` / `low` / `medium` / `high` / `xhigh` / `max`，但**可用范围逐型号收窄**。
+官方原文（API 支持表脚注）：
+
+- `max` —— **只在 GPT-6 或 GPT-5.6 且使用 Responses API** 时可用
+- `xhigh` —— 只支持 GPT-6 / GPT-5.6 / GPT-5.5 / GPT-5.4 / `gpt-5.1-codex-max`
+- `minimal` —— 只支持**初代** GPT-5 推理模型；**`gpt-5.1` 及更高不支持**
+- `none`（关闭推理）—— 支持 5.6 / 5.5 / 5.4 / 5.2 / 5.1 系列（初代 GPT-5 **不在**列表中）
+- `gpt-5-pro` —— **只支持 `high`**，且它就是默认值
+
+| 模型 | 上下文 | 最大输出 | 档位（本插件写入值） |
+|---|---|---|---|
+| `gpt-6-*`（astra / sol / luna） | **1,050,000** | **128,000** | `none`/`low`/`medium`/`high`/`xhigh` |
+| `gpt-5.6-*`（sol / terra / luna） | **1,050,000** | **128,000** | 同上 |
+| `gpt-5.5` / `5.4` / `5.2` / `5.1` | 400,000 | 128,000 | 同上 |
+| `gpt-5.1-chat` | 128,000 | **16,384** | 同上 |
+| `gpt-5.1-codex-max` | 400,000 | 128,000 | 同上（5.1 系里唯一有 `xhigh`） |
+| `gpt-5-pro` | 400,000 | 128,000 | **仅 `high`** |
+| 初代 `gpt-5*`（含 -mini / -nano / -codex） | 400,000 | 128,000 | `minimal`/`low`/`medium`/`high`（**无** `none`） |
+
+> **插件刻意不写 `max`**：本插件服务的路由是 OpenAI 兼容的 `openai-completions`
+> （走 Chat Completions），而官方明确 `max` 只在 Responses API 下工作。写进去等于让
+> 界面显示一个在该协议下必然被拒的档位。注意这与 Claude 的 `max` 无关 —— 后者是
+> Anthropic 自己的 effort 枚举，不受 OpenAI 的 Responses API 限制。
+
+### Anthropic Claude
+
+**档位枚举（厂商官方一手来源，Anthropic 官方 SDK 的生成代码）**：
+`output_config.effort` = `low` / `medium` / `high` / `xhigh` / `max` —— **共 5 档，注意有 `xhigh`**。
+来源：<https://raw.githubusercontent.com/anthropics/anthropic-sdk-python/main/src/anthropic/types/output_config_param.py>
+
+**Messages API 顶层没有 `reasoning_effort` 字段**，effort 挂在 `output_config` 下。
+
+`thinking` 是四选一联合类型，**支持关闭**：`{"type":"enabled","budget_tokens":N}`（N≥1024）、
+`{"type":"disabled"}`、`{"type":"adaptive"}`、`{"type":"between_tools"}`。
+
+> **插件刻意不写 `off`**：Anthropic 关闭思考是 `thinking: {"type":"disabled"}`，它**不是**
+> effort 的一个档位值。写成 `off` 会让 DSH 显示一个「关闭思考」选项，而实际效果只是
+> 不发 effort 字段、思考照旧按默认开启 —— 那是误导。
+
+上下文窗口与最大输出（**云平台口径**，AWS Bedrock 官方模型卡）：
+
+| 模型 id | 上下文 | 最大输出 | 能否关闭思考 | 来源 |
+|---|---|---|---|---|
+| `claude-fable-5` / `claude-mythos-5-1` | 1M | 128K | **否**（官方原文 "adaptive thinking is always on and cannot be disabled"） | [Fable 5](https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-anthropic-claude-fable-5.html) |
+| `claude-opus-5` | 1M | 128K | 是（禁用时 effort 上限为 high） | [Opus 5](https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-anthropic-claude-opus-5.html) |
+| `claude-sonnet-5` | 1M | 128K | 是 | [Sonnet 5](https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-anthropic-claude-sonnet-5.html) |
+| `claude-opus-4-8` | 1M | 128K | 未列（卡片仅写 "Reasoning: Supported"，**未公布档位枚举**） | [Opus 4.8](https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-anthropic-claude-opus-4-8.html) |
+| `claude-haiku-4-5` | 200K | 64K | 未列 | [Haiku 4.5](https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-anthropic-claude-haiku-4-5.html) |
+
+`claude-opus-4-8` 与 `claude-haiku-4-5` 官方**未公布档位枚举**，插件因此登记为
+「认得出、但不写档位」—— 免得界面把它们归进「认不出家族」再诱导用户用通用模板补上无效档位。
+
+### Google Gemini
+
+**档位枚举（厂商官方 SDK 生成代码）**：`thinking_level` = `MINIMAL` / `LOW` / `MEDIUM` / `HIGH`
+（另有 `THINKING_LEVEL_UNSPECIFIED`）。REST 侧小写。
+来源：<https://raw.githubusercontent.com/googleapis/js-genai/main/src/types.ts>、
+<https://raw.githubusercontent.com/googleapis/python-genai/main/google/genai/types.py>
+
+**关键区别**：Gemini 用的是 **`thinking_level`，不是 `reasoning_effort`** —— 后者在 Google 官方
+SDK 与官方 proto 中**均不存在**。另有 `thinking_budget`（int32）与 `include_thoughts`（bool），
+挂在 `GenerationConfig.thinking_config`。
+来源：<https://raw.githubusercontent.com/googleapis/googleapis/master/google/ai/generativelanguage/v1beta/generative_service.proto>
+
+**未找到官方数据**：Gemini 任何在售型号的**上下文窗口与最大输出**（一个数字都没有）；
+**能否关闭思考**（官方 proto 里没有任何关闭字段，但也未说明 `thinking_budget=0` 的语义，
+故不推断）。插件因此**不给 Gemini 写规格**，只写与官方枚举同名的四档。
 
 ### 仍然值得记下的两条结论
 
@@ -284,17 +357,17 @@ M2.7 及更早的 M 系列**没有**这类官方表述，一律不补。
 2. **OpenAI 已有更新的旗舰 `gpt-6-astra`**（2026-09-08），且 GPT-5.6 是 **Sol / Terra / Luna
    三个分档**，不带后缀的 `gpt-5.6` 未见官方模型页。
 
-要补齐国外这块，需要能绕过 Cloudflare/网络封锁的环境，重点核对：
-`developers.openai.com/api/docs/models/compare`、
-`platform.claude.com/docs/en/about-claude/models/overview`、
-`ai.google.dev/gemini-api/docs/models`、`docs.x.ai/docs/models`、
-`docs.mistral.ai/getting-started/models`。
+要补齐 Google 这块，需要能绕过网络封锁的环境，重点核对：
+`ai.google.dev/gemini-api/docs/models`、`cloud.google.com/vertex-ai/generative-ai/docs/models`。
 
 ---
 
 ## 本机配置映射
 
-`C:\Users\asus\.dsh\settings.yaml` 里那 30 个 id 的归属判断：
+DSH 0.2 起配置**不在 `~/.dsh/settings.yaml`**（旧文件会被一次性导入后改名成 `.imported`），
+而在 `~/.dsh/profiles/<profile>/cordis.patch.yml` 里 `llm-pi-ai` 条目的 `config.providers`。
+
+配置里那 30 个 id 的归属判断：
 
 | 配置里的 id | 判断 | 建议 |
 |---|---|---|
@@ -309,11 +382,25 @@ M2.7 及更早的 M 系列**没有**这类官方表述，一律不补。
 | `hy3` / `hy4-preview` | **官方名本身**，非简写 | — |
 | `qwen3.7-max` / `qwen3.7-plus` / `qwen3.8-max` / `qwen3.8-flash` | 官方名（`3.7-max` 属旧版） | — |
 | `MiniMax-M2.7` / `MiniMax-M2.7-highspeed` / `MiniMax-M3` / `minimax-m3` | 官方名；`minimax-m3` 与 `MiniMax-M3` 大小写不同，**同物** | 二选一即可 |
-| `mimo-v2.5` / `mimo-v2.5-pro` | 均为官方名，均在架；**只有非 pro 版支持全模态理解** | 需要读图时选 `mimo-v2.5` |
+| `grok-4.5` / `grok-4.6` / `grok-4.7` | 官方名 | 声明**不要写 `off`**（4.5 起不可关闭推理）；4.6/4.7 可加 `xhigh` |
+| `mimo-v2.5` / `mimo-v2.5-pro` | 均为官方名；**只有非 pro 版支持全模态理解** | ⚠️ **2026.10.21 下线，无替换**，请尽快切到 `mimo-v2.6-*` |
 
-### 本轮（2026-09-16）复核后可考虑加入的官方新模型
+### 本轮（2026-10-03）新增适配
 
-下列 id 已在本轮取得官方来源，插件也已登记规格/档位/多模态，但**你的中转站未必已上架** ——
+**你的中转站上已提供、但插件此前认不出的 10 个模型**（用设置页的「同步模型」拉进来时
+会用到这些判定）：
+
+| 模型 id | 档位判定 | 规格 | 图像 |
+|---|---|---|---|
+| `gpt-6-astra` / `gpt-5.6-sol` / `gpt-5.6-terra` | `none`/`low`/`medium`/`high`/`xhigh` | 1,050,000 / 128,000 | ✅ |
+| `gpt-5.5` | 同上 | 400,000 / 128,000 | ✅ |
+| `claude-fable-5` / `claude-opus-5` / `claude-sonnet-5` | `low`/`medium`/`high`/`xhigh`/`max`（**不写 `off`**） | 1M / 128K | ✅ |
+| `claude-opus-4-8` | **刻意不写**（官方未公布枚举） | 1M / 128K | ✅ |
+| `mimo-v2.6-pro` / `mimo-v2.6-flash` | **刻意不写**（只有 thinking 开关） | 1M / 128K | ✅ |
+
+### 本轮复核后可考虑加入的官方新模型
+
+下列 id 已取得官方来源，插件也已登记规格/档位/多模态，但**你的中转站未必已上架** ——
 用设置页的「同步模型」拉到什么就以什么为准：
 
 | 官方 id | 规格 | 说明 |
@@ -323,7 +410,19 @@ M2.7 及更早的 M 系列**没有**这类官方表述，一律不补。
 | `hy-mt2-pro` / `hy-mt2-plus` / `hy-mt2-lite` | 8k / 4k | 混元翻译专用（无思考档位，插件刻意不写） |
 | `hy-role` / `hunyuan-role-latest` | 32k / 4k | 混元角色扮演专用（同上） |
 | `glm-ocr` | 单图 ≤10MB、PDF ≤50MB | 智谱轻量 OCR（无对话档位） |
+| `mimo-v2.6-pro` / `mimo-v2.6-flash` / `mimo-v2.6-pro-ultraspeed` | 1M / 128K | **V2.5 的替代品**（后者 10.21 下线） |
+| `grok-4.3` | — | 唯一可关闭推理的 Grok；`grok-4.5`+ 均不可关 |
+| `claude-mythos-5-1` / `claude-haiku-4-5` | 1M / 128K；200K / 64K | Haiku 官方未公布档位枚举（插件不写） |
 
 `glm-image`（图像生成）、`cogvideox-3`（视频生成）、`glm-asr-2512`（语音识别）、`glm-tts`（语音合成）、
 `embedding-3`（向量）等**非对话模型**不在本插件的适用范围内：它们没有 `reasoningEffort` 与
 `contextWindow` 语义，插件也不会给它们写任何字段。
+
+### 仍未取得官方数据的厂商
+
+**Google Gemini**：官方 SDK 已给出 `thinking_level` 四档枚举（插件据此写入），但
+**上下文窗口与最大输出一个数字都没取到**（`ai.google.dev`、`cloud.google.com`、
+`docs.cloud.google.com`、`generativelanguage.googleapis.com` 全部抓取失败，
+`r.jina.ai` 代理亦失败）。所以插件**不给 Gemini 写规格**，只写档位。
+
+**Meta / Mistral**：本轮未查证，插件里没有任何规则（认不出就不写）。

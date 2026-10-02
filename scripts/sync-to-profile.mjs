@@ -33,7 +33,12 @@ if (!fs.existsSync(target)) {
   process.exit(1)
 }
 
-/** 要同步的相对路径。`test/` 也带上，便于在 profile 内自查。 */
+/**
+ * 要同步的相对路径。
+ *
+ * `test/` 与 `docs/` 走下面的目录扫描（它们会新增文件），这里只列固定文件。
+ * `docs/MODEL_SPECS.md` 一度漏掉过 —— 它是插件核对结论的落点，必须跟着走。
+ */
 const FILES = [
   'lib/index.js',
   'lib/client.js',
@@ -41,8 +46,12 @@ const FILES = [
   'cordis.patch.yml',
   'README.md',
   'scripts/fix-efforts.mjs',
-  'scripts/unpack-dsh.mjs'
+  'scripts/unpack-dsh.mjs',
+  'scripts/sync-to-profile.mjs'
 ]
+
+/** 整目录同步：逐个文件比对，新增的也带过去。 */
+const DIRS = ['test', 'docs']
 
 function same (a, b) {
   if (!fs.existsSync(b)) return false
@@ -56,9 +65,13 @@ for (const rel of FILES) {
   if (!same(from, path.join(target, rel))) changed.push(rel)
 }
 
-for (const name of fs.readdirSync(path.join(source, 'test'))) {
-  const from = path.join(source, 'test', name)
-  if (!same(from, path.join(target, 'test', name))) changed.push('test/' + name)
+for (const dir of DIRS) {
+  const from = path.join(source, dir)
+  if (!fs.existsSync(from)) continue
+  for (const name of fs.readdirSync(from)) {
+    const rel = dir + '/' + name
+    if (!same(path.join(from, name), path.join(target, rel))) changed.push(rel)
+  }
 }
 
 if (changed.length === 0) {
