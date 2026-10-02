@@ -28,7 +28,13 @@ const plugin = await import(new URL('../lib/index.js', import.meta.url).href)
 const NS = 'llm-pi-ai'
 const BASE_PATH = '/api/relay-toolkit'
 
-/** 造一份用户层配置。 */
+/**
+ * 造一份用户层配置。
+ *
+ * 描述符的形状按 **DSH 0.2** 来：`settings.get(ns)` 已被移除，宿主只给
+ * `describe()`，其中 `value` 是解析后的生效值、`user` 是用户写下的那一层。
+ * 这里两者相同（没有底座层模型），所以该路由可写。
+ */
 function makeSettings () {
   const state = {
     revision: 3,
@@ -49,8 +55,7 @@ function makeSettings () {
   return {
     state,
     service: {
-      get: ns => (ns === NS ? state.user : undefined),
-      describe: () => [{ ns: NS, user: state.user, revision: state.revision }],
+      describe: () => [{ ns: NS, value: state.user, user: state.user, revision: state.revision }],
       update: async () => {}
     }
   }

@@ -35,13 +35,21 @@ function makeHost (state, options = {}) {
       return () => {}
     }
   }
+  // DSH 0.2 的 settings 服务：**没有 `get()`**，描述符是唯一入口。
+  // mock 刻意不提供 get，这样任何回退到旧 API 的代码都会在这里暴露。
   const settings = {
-    get: ns => {
-      if (ns === NS) return state.resolved
-      if (ns === 'agent-default-model') return state.defaultModel
-      return undefined
+    describe: () => {
+      const rows = [{ ns: NS, value: state.resolved, user: state.user, revision: state.revision }]
+      if (state.defaultModel !== undefined) {
+        rows.push({
+          ns: 'agent-default-model',
+          value: state.defaultModel,
+          user: state.defaultModel,
+          revision: 1
+        })
+      }
+      return rows
     },
-    describe: () => [{ ns: NS, user: state.user, revision: state.revision }],
     update: async (ns, patch, revision) => {
       state.updates.push({ ns, patch, revision })
       // 模拟真实 settings：写入后 revision 前进，用户层被合并。
@@ -1064,4 +1072,141 @@ test('probe 限制单次探测的模型数，并如实报告被截断', async t 
   assert.equal(payload.value.truncated, true)
   assert.equal(payload.value.total, 55)
   assert.equal(calls, 50, '被截断的模型不该真的发请求')
+})
+
+/**
+ * DSH 0.2 适配回归 —— 这一组用例锁定新版契约。
+ *
+ * 0.2 的 `settings` 服务**移除了 `get(ns)`**，描述符（`describe()`）成为唯一入口；
+ * 旧实现把 `get` 当成必需方法，于是整个插件在新宿主上静默失效。上面的 mock 已
+ * 刻意不提供 `get`，这里再补两条断言把「只能走描述符」这件事写死。
+ */
+
+test('适配 0.2：settings 只有 describe，没有 get 时插件照常工作', async () => {
+  const state = makeState({
+    userProviders: {
+      gm: {
+        baseURL: 'https://relay.example/v1',
+        models: [{ id: 'glm-5.2', name: 'glm-5.2' }]
+      }
+    }
+  })
+  const host = makeHost(state)
+  // mock 里没有 get；再显式确认一次，防止将来有人"顺手"加回去而让这条用例失去意义。
+  assert.equal(typeof host.settings.get, 'undefined', 'mock 必须没有 get，才能证明插件不依赖它')
+
+  apply(host.ctx)
+  const { payload } = await callRoute(host, { endpoint: '/status' })
+  assert.equal(payload.ok, true)
+  assert.equal(payload.value.routes.length, 1, '描述符里的路由必须被读出来')
+  assert.equal(payload.value.routes[0].route, 'gm')
+})
+
+test('适配 0.2：解析值取自描述符的 value，用户层取自 user', async () => {
+  // 刻意让两层不同：resolved 比 user 多一个底座模型。
+  const state = makeState({
+    userProviders: {
+      gm: { baseURL: 'https://relay.example/v1', models: [{ id: 'a', name: 'a' }] }
+    },
+    resolvedProviders: {
+      gm: { baseURL: 'https://relay.example/v1', models: [{ id: 'a', name: 'a' }, { id: 'b', name: 'b' }] }
+    }
+  })
+  const host = makeHost(state)
+  apply(host.ctx)
+
+  const { payload } = await callRoute(host, { endpoint: '/status' })
+  const route = payload.value.routes[0]
+  assert.equal(route.modelCount, 2, '模型总数来自解析值')
+  assert.equal(route.writable, false, '含底座层模型的路由不可写')
+  assert.match(route.blockedReason, /底座层声明/)
+})
+
+test('适配 0.2：discoverModels 的 inputModalities 优先于内置官方能力表', async t => {
+  // `some-new-model` 不在内置 VISION_FAMILIES 里 —— 只有发现结果说它收图。
+  const state = makeState({
+    userProviders: {
+      gm: {
+        baseURL: 'https://relay.example/v1',
+        models: [{ id: 'some-new-model', name: 'some-new-model' }]
+      }
+    }
+  })
+  const llm = {
+    discoverModels: async () => [
+      { id: 'some-new-model', name: 'some-new-model', inputModalities: ['text', 'image'] }
+    ]
+  }
+  stubFetch(t, async () => chatOk('x'))
+  const host = makeHost(state, { llm })
+  apply(host.ctx)
+
+  const { payload } = await callRoute(host, { method: 'POST', endpoint: '/modalities', body: { route: 'gm' } })
+  assert.equal(payload.ok, true)
+  assert.equal(payload.value.fills.length, 1, '发现结果说收图就该补')
+  assert.equal(payload.value.fills[0].source, 'discovery', '来源要标成发现结果而不是内置表')
+  assert.deepEqual(payload.value.fills[0].input, ['text', 'image'])
+
+  const written = state.user.providers.gm.models[0]
+  assert.deepEqual(written.input, ['text', 'image'], '要真的写进用户层')
+})
+
+test('适配 0.2：发现结果没提模态时，仍退回内置官方能力表兜底', async t => {
+  const state = makeState({
+    userProviders: {
+      gm: {
+        baseURL: 'https://relay.example/v1',
+        models: [{ id: 'deepseek-v4.1-flash', name: 'deepseek-v4.1-flash' }]
+      }
+    }
+  })
+  // 发现结果只给容量，没有 inputModalities（旧目录就是这样）。
+  const llm = {
+    discoverModels: async () => [
+      { id: 'deepseek-v4.1-flash', name: 'deepseek-v4.1-flash', contextWindow: 1000000, maxTokens: 384000 }
+    ]
+  }
+  stubFetch(t, async () => chatOk('x'))
+  const host = makeHost(state, { llm })
+  apply(host.ctx)
+
+  const { payload } = await callRoute(host, { method: 'POST', endpoint: '/modalities', body: { route: 'gm' } })
+  assert.equal(payload.value.fills.length, 1, '内置表要兜住这个模型')
+  assert.match(payload.value.fills[0].source, /DeepSeek/, '来源指向内置官方能力表')
+})
+
+test('适配 0.2：发现结果失败时只记原因，仍按内置表补全', async t => {
+  const state = makeState({
+    userProviders: {
+      gm: {
+        baseURL: 'https://relay.example/v1',
+        models: [{ id: 'deepseek-v4.1-flash', name: 'deepseek-v4.1-flash' }]
+      }
+    }
+  })
+  const llm = {
+    discoverModels: async () => { throw new Error('上游不可达') }
+  }
+  stubFetch(t, async () => chatOk('x'))
+  const host = makeHost(state, { llm })
+  apply(host.ctx)
+
+  const { payload } = await callRoute(host, { method: 'POST', endpoint: '/modalities', body: { route: 'gm' } })
+  assert.equal(payload.ok, true, '发现失败不该让整次补全失败')
+  assert.equal(payload.value.discoveryErrors.length, 1, '失败原因要回报给界面')
+  assert.match(payload.value.discoveryErrors[0].reason, /上游不可达/)
+  assert.equal(payload.value.fills.length, 1, '内置表照常兜底')
+})
+
+test('适配 0.2：宿主没有 settings 服务时，端点回可读原因而不是崩溃', async () => {
+  const state = makeState({ userProviders: {} })
+  const host = makeHost(state)
+  // 摘掉 settings，模拟一个没有该服务的组合。
+  const original = host.ctx.get
+  host.ctx.get = serviceName => (serviceName === 'settings' ? undefined : original(serviceName))
+
+  apply(host.ctx)
+  const { payload } = await callRoute(host, { endpoint: '/status' })
+  assert.equal(payload.ok, true, '只读视图不该因为缺服务而失败')
+  assert.deepEqual(payload.value.routes, [], '没有 settings 时视图为空')
 })

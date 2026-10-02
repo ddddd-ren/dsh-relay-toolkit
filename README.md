@@ -1,9 +1,13 @@
 # dsh-relay-toolkit
 
-给 **DeepSeek Harness（DSH）** 用的中转站维护插件：把中转站 `/models` 里缺失的模型合并进
+给 **DeepSeek Harness（DSH）0.2** 用的中转站维护插件：把中转站 `/models` 里缺失的模型合并进
 `llm-pi-ai` 路由，给缺少 `reasoningEfforts` 声明的模型补上思考等级，把上下文窗口与最大
 输出上限对齐到官方目录（或上游）给出的数值，补上缺失的图像输入声明（多模态），
 并**实测每个模型是否真的调得通**。
+
+> 适配 **DSH 0.2.0-rc.2**。0.1.5-rc.1 时代的版本在 0.2 上会**静默失效**
+> （0.2 移除了 `settings.get(ns)`）—— 症状是设置页区块一片空白却没有任何报错。
+> 详见「兼容性 → 0.1.5-rc.1 → 0.2.0-rc.2 改了什么」。
 
 设置页会多出一个「中转站工具」区块，每条路由一张卡片。按钮随该路由的实际情况出现：
 **同步模型**与**测试连通性**恒在，**补全思考等级**、**用通用模板补全**、**对齐窗口与输出**、
@@ -17,7 +21,7 @@
 - **不按模型名字猜能力。** 只覆盖能确认的家族（deepseek / glm / kimi / qwen / hy3）；
   认不出来的模型在界面上标为「未识别」，一个字段都不写。
 - **不改 `baseURL`、`apiKeyEnv`、`compat`，也不删任何模型条目。**
-- **不发送遥测。** 对外请求只有两类，都发往你在 settings.yaml 里配置的那条路由自己的
+- **不发送遥测。** 对外请求只有两类，都发往你在 `llm-pi-ai` 里配置的那条路由自己的
   `baseURL`：向 `/models` 发 GET（带该路由凭据引用解析出的 Key），
   以及**你点「测试连通性」时**向 `/chat/completions`（或 `/responses`）发的那一句 `hi`。
 
@@ -25,20 +29,21 @@
 
 | 保证 | 实现方式 |
 |---|---|
-| 只写用户配置层 | 只改 `settings.describe()` 里 `user` 层的 `providers[route].models` |
+| 只写用户配置层 | 只改 `settings.describe()` 里 `user` 层的 `providers[route].models`（0.2 起描述符是唯一读取入口） |
 | 只填空缺，绝不覆盖 | 已有 `reasoningEfforts`（含 `reasoningEfforts: false`）一律跳过 |
 | 不固化底座层配置 | 若某路由的生效模型集合不等于用户层集合（含底座声明的模型），该路由禁用写入并在界面说明原因 |
 | 不覆盖并发修改 | 每次 `settings.update` 都带上读取时的 `revision` |
 | 只服务本机 | 路由拒绝非 loopback 来源的请求 |
 | 只写合法声明 | 建议值经 `LEVELS` 白名单过滤；等级键只能是 `off/minimal/low/medium/high/xhigh/max`，值只能是该等级的线上拼写（仅 `off` 可为 `null`），且至少一个非 `off` 等级 |
 | 不给官方不支持的模型写档位 | 官方确认不支持 `reasoning_effort` 的家族一个字段都不写，连「用通用模板补全」也绕开它们（见下方「官方不支持档位 ≠ 认不出家族」） |
-| 不猜多模态能力 | 图像输入声明只补官方文档确认能收图的模型，认不出就不写；已声明 `input` 的条目（含只写 `text`）一律不动 |
+| 不猜多模态能力 | 图像输入声明先信 `discoverModels` 的 `inputModalities`，没给才退回内置官方能力表；两处都认不出就不写。已声明 `input` 的条目（含只写 `text`）一律不动 |
 | 探测绝不写配置 | `/probe` 只发一句 `hi` 并回报结果，不调用 `settings.update`；对不可写的路由同样可用 |
 | 探测不误报限流 | 单次最多 50 个模型、并发 3，避免把「被上游限流」误报成「模型不可用」 |
 
 ## 安装
 
-需要 **Node 18 或更高**（宿主用到 `AbortSignal.timeout` 与顶层 `await`；用 DSH 自带的运行时即可）。
+需要 **Node 22 或更高**（宿主用到 `AbortSignal.timeout` 与顶层 `await`；DSH 0.2 自带的
+运行时是 Node 24，直接用它即可）。
 
 把仓库放到任意位置，然后按你的实际路径安装 —— 下面这条是示例路径，**换成你自己的**：
 
@@ -171,13 +176,15 @@ dsh plugin --profile desktop remove dsh-relay-toolkit
 
 **三条边界**：
 
-1. 只写 `input`，**不写** `inputModalities`。后者是 DSH 内置适配器（`llm-deepseek`）
-   的字段，pi-ai 风格的路由用的是 `input`，写错等于没写；
-2. 只补官方文档确认能收图的模型：`deepseek-flash` / `deepseek-v4.1*`、
+1. 只写 `input`，**不写** `inputModalities`。后者是模型条目在 `discoverModels`
+   结果里的字段名（以及 DSH 内置适配器 `llm-deepseek` 的配置字段），pi-ai 风格的路由
+   配置里用的是 `input`，写错等于没写；
+2. 能力来源**两级**：先信 `discoverModels` 的 `inputModalities`（上游或已装目录自己的
+   声明），它没给模态时才退回内置官方能力表 —— `deepseek-flash` / `deepseek-v4.1*`、
    `glm-5.3-flash`、Kimi 的 `kimi-k3` / `k3-256k` / `kimi-for-coding*` / `kimi-k2.6` /
    `kimi-k2.7-code*`、Qwen 的 `qwen3.8-max` / `qwen3.8-flash` / `qwen3.7-plus` / `qwen3.7-flash`、
    `MiniMax-M3`、`mimo-v2.5`（**不含 `mimo-v2.5-pro`**，见下）。
-   国外厂商本轮复核依旧没有可核对的官方来源，一个都不补；
+   两处都认不出就不补 —— 国外厂商没有可核对的官方来源，内置表里一个都不收；
 3. **官方能力 ≠ 中转站能力**。声明只代表模型本身能收图，你的中转站是否真的向上游透传
    图像**必须自己实测**。所以这一步**必须由你点**，
    不参与自动补全 —— 写错了的表现是请求被上游拒绝，而不是静默降级。
@@ -195,19 +202,45 @@ dsh plugin --profile desktop remove dsh-relay-toolkit
 
 ## 兼容性
 
-针对 **DSH 0.1.5-rc.1**（`@deepseek-ai/cordis` 4.x 线）逐项核对过：
+针对 **DSH 0.2.0-rc.2**（`@deepseek-ai/cordis` 4.0.4 线）逐项核对过：
 
 - 宿主路由注册：`ctx.effect(() => server.register({ kind, path, handler }))`，
   `webServer` / `httpServer` 双名兼容 —— Cordis 的 `inject` 没有可选形式，
   所以这两个名字是放在**嵌套** `ctx.inject` 里等待的，模块级 `inject` 留空，
   没有 web 服务的组合也能正常加载；
-- `settings.get(ns)` / `settings.describe()` / `settings.update(ns, patch, revision)`；
+- **`settings.get(ns)` 在 0.2 已被移除**，描述符成为唯一读取入口：
+  `settings.describe()` → `[{ ns, revision, value, base, user, schema, applies }]`，
+  其中 `value` 是解析后的生效值（旧 `get(ns)` 的替代物）、`user` 是用户写下的那一层；
+  写入仍是 `settings.update(ns, patch, revision)`，revision 冲突检测照旧；
 - `credentials.resolve(ref)` → `{ value }`；
-- `llm.discoverModels(settingsNs, { provider })` → `[{ id, name, contextWindow?, maxTokens? }]`
+- `llm.discoverModels(settingsNs, { provider })` → `[{ id, name, contextWindow?, maxTokens?, inputModalities? }]`
   —— 窗口/输出上限的对齐来源：provider 命中已装目录时直接返回目录数值，否则查上游；
-- 客户端：`ctx.slots.inject('settings.section', () => ctx.slots.register({...}, Component))`；
+  **0.2 新增的 `inputModalities` 也用于图像声明**，且优先于内置官方能力表（见下）；
+- 客户端：`ctx.slots.inject('settings.section', () => ctx.slots.register({...}, Component))`，
+  `settings.section` 是 list 槽位，注册必须带 `id`；
 - 客户端 bundle 只 `require('react')` 与 `react/jsx-runtime`（平台播种表内），
   因此不需要 `dsh.client.external` 声明。
+
+### 0.1.5-rc.1 → 0.2.0-rc.2 改了什么
+
+**根因**：0.2 移除了 `settings.get(ns)`。旧实现把它当成必需方法
+（`typeof settings.get !== 'function'` 就直接放弃），于是插件在新宿主上
+**整体静默失效** —— 设置页一片「读取中…」，日志里却没有一句报错。这正是
+「mock 全绿、实机全废」的典型：测试里的假 settings 提供了 `get`，真宿主没有。
+
+三处改动：
+
+1. 读取改走 `settings.describe()`，取 `value`（生效值）与 `user`（用户层）；
+   一次请求只取一次快照，因为 `describe()` 会推进 revision 并广播事件；
+2. 默认模型诊断同样改走描述符（`agent-default-model` 的 `provider` / `model`
+   都是 volatile 字段，会出现在 `value` 里）；
+3. 图像声明改为**发现结果优先**：0.2 的 `discoverModels` 新增了
+   `inputModalities`，这是比内置官方能力表更权威的一手来源；发现结果没给模态时
+   才退回内置表，发现失败也只记原因、不阻断补全。
+
+测试也一并加固，避免同类问题复发：`test/host.test.mjs` 的 mock **刻意不再提供
+`get`**，并新增 6 条 0.2 回归用例；`test/contract-0.2.mjs` 直接对解包出来的真实
+DSH 实现做 20 项静态契约断言（含「`settings.get()` 必须不存在」这条）。
 
 ## 开发
 
@@ -215,8 +248,10 @@ dsh plugin --profile desktop remove dsh-relay-toolkit
 `__ModuleLoader__` bundle）都是可直接运行的产物。
 
 ```sh
-node --test test/host.test.mjs test/client.test.mjs   # 45 项
+node --test test/host.test.mjs test/client.test.mjs test/scripts.test.mjs   # 64 项
 node test/cordis-smoke.mjs                            # 真实 cordis 冒烟
+node test/real-settings-smoke.mjs                     # 真实 settings 形状下的端到端
+node test/contract-0.2.mjs                            # 真实 DSH 0.2 契约核对（20 项）
 ```
 
 - `test/host.test.mjs`：mock cordis 上下文与假 `/models` 响应，端到端驱动宿主逻辑 ——
@@ -231,17 +266,31 @@ node test/cordis-smoke.mjs                            # 真实 cordis 冒烟
   只读不写配置、401/403/404/429 的错误翻译、**403 以上游原因为准**、
   「HTTP 200 但 body 是错误」的假成功、`reasoning_content` 与 Responses API 的
   `output_text`、不支持的 `api` 类型不发请求、模型数截断与并发。
+  **0.2 适配部分（6 项）**：无 `settings.get` 时照常工作、`value`/`user` 分层读取、
+  `inputModalities` 优先于内置表、无模态时退回内置表、发现失败仍兜底、
+  缺 `settings` 服务时端点回可读原因。
 - `test/client.test.mjs`：执行 `lib/client.js`，验证 bundle 契约（以包名注册、
   只依赖平台播种表内的 react）与 `settings.section` 的注册形状。
+- `test/scripts.test.mjs`（10 项）：`scripts/fix-efforts.mjs` 的参数解析与安全阀。
+  这脚本改的是真实配置，所以它的参数解析单独测 —— 第一版曾因 `--profile` 缺失时
+  丢掉第一个位置参数，让目标静默落回真实路径（详见「脚本」一节）。
 - `test/cordis-smoke.mjs`：用**真实的 `@deepseek-ai/cordis`** 加载本插件，确认嵌套
   `inject` + 服务访问不会触发 `cannot get property "..." without inject`。
+- `test/real-settings-smoke.mjs`：把**按真实 `dsh-settings` 接口面逐个抄下来**的
+  settings 服务（**没有 `get`**）挂进真实 cordis，端到端驱动插件。这是本轮修复的判据：
+  旧代码在这里读出 `routes: 0`（静默失效），修复后为 1。
+- `test/contract-0.2.mjs`：读**解包出来的真实 DSH 源码**做静态契约断言。
+  mock 会随实现一起过期（本轮就是这么栽的），所以这一层专门用来钉住
+  「插件假设的 API」与「DSH 实际提供的 API」一致。
 
-冒烟测试需要 DSH 的实现代码，先用脚本解出来（默认解到系统临时目录）：
+这三个需要 DSH 实现代码的检查，先用脚本解出来（默认解到系统临时目录）：
 
 ```sh
 node scripts/unpack-dsh.mjs
 # DSH 装在别处：node scripts/unpack-dsh.mjs "D:/path/to/app.asar"
-# 解到别处时用环境变量指路：set DSH_CORDIS_PATH=<...>/@deepseek-ai/cordis/lib/index.js
+# 解到别处时用环境变量指路：
+#   set DSH_CORDIS_PATH=<...>/@deepseek-ai/cordis/lib/index.js
+#   set DSH_UNPACKED=<解包目录>
 ```
 
 ### 改完源码要重装
@@ -254,37 +303,69 @@ dsh plugin --profile desktop remove dsh-relay-toolkit
 dsh plugin --profile desktop add file:C:/Users/<你>/dsh-plugins/dsh-relay-toolkit
 ```
 
-然后重启 DSH Desktop。
+或者用仓库里的同步脚本（等价于重装，但会先列出差异并备份旧副本）：
+
+```sh
+node scripts/sync-to-profile.mjs --check   # 只看哪些文件有差异
+node scripts/sync-to-profile.mjs           # 同步（默认 desktop profile）
+node scripts/sync-to-profile.mjs --profile web
+```
+
+两种方式之后都要重启 DSH Desktop。
 
 ## 脚本
 
-`scripts/` 下有两个**不随插件加载**的辅助脚本：
+`scripts/` 下有三个**不随插件加载**的辅助脚本：
 
-- **`fix-efforts.mjs`** —— 按同一张官方档位表批改 `settings.yaml`（直接 import 插件的
+- **`sync-to-profile.mjs`** —— 把源码同步进 profile 的已安装副本（见上）。
+  `--check` 只比对差异、不写；写入前会把旧副本备份成
+  `node_modules/dsh-relay-toolkit.bak-before-sync`。
+
+- **`fix-efforts.mjs`** —— 按同一张官方档位表批改**补丁层配置**（直接 import 插件的
   `suggestEfforts`，不另抄一份表，所以判定永远与插件一致）。它比界面上的按钮激进：
   官方确认不支持 `reasoning_effort`（或未公布档位）的模型，它会把已有的
   `reasoningEfforts` **删掉**；认不出家族的原样不动。留着无效档位是有害的 ——
   DSH 会把它们显示给用户选，一选就真发 `reasoning_effort`。
 
+  **DSH 0.2 起配置不在 `~/.dsh/settings.yaml` 了**（旧文件会被一次性导入后改名成
+  `.imported`），真实配置在 profile 的补丁层
+  `~/.dsh/profiles/<profile>/cordis.patch.yml` 里 `llm-pi-ai` 条目的 `config.providers`。
+  脚本因此改读那个文件，并且**用能保留注释的 yaml 库**重写 —— 补丁层是手写的，
+  用丢注释的库会把你的注释一并抹掉。
+
   ```sh
   node scripts/fix-efforts.mjs --dry-run          # 只看会改什么，不写文件
-  node scripts/fix-efforts.mjs                    # 真正写入（默认 ~/.dsh/settings.yaml）
-  node scripts/fix-efforts.mjs <settings.yaml>    # 指定文件
+  node scripts/fix-efforts.mjs                    # 真正写入（默认 desktop profile）
+  node scripts/fix-efforts.mjs --profile web      # 指定 profile
+  node scripts/fix-efforts.mjs <cordis.patch.yml> # 指定文件
+  node scripts/fix-efforts.mjs --print-target     # 只打印会改哪个文件，别的都不做
   ```
 
-  **跑之前先备份 settings.yaml。** 脚本需要 `js-yaml`，它向 DSH 的 profile 借；
-  找不到时用 `DSH_JS_YAML` 指路：
+  **每次运行都会先把目标路径打印出来**（`目标：…`），动真实配置前请自己看一眼。
+  它另外带一道安全阀：目标必须真的是补丁层（顶层非空序列 + 含 `llm-pi-ai` 条目 +
+  该条目有 `config.providers`），否则拒绝写入。
+
+  > 这道安全阀是踩出来的：脚本第一版的参数解析有 bug —— `--profile` 不存在时
+  > `indexOf` 返回 -1，`index !== profileIndex + 1` 恰好把**第一个位置参数丢掉**，
+  > 于是目标静默落回默认路径（真实配置），指定的测试文件反而没被读。参数解析已改成
+  > 显式循环，安全阀再加一层。
+
+  脚本需要 `yaml`（eemeli/yaml，DSH 自己的依赖，支持 document 级编辑因而能保留注释）；
+  它向 DSH 的 profile 借，找不到时用 `DSH_YAML` 指路：
 
   ```sh
-  set DSH_JS_YAML=%USERPROFILE%\.dsh\profiles\desktop\node_modules\js-yaml\dist\js-yaml.mjs
+  set DSH_YAML=%USERPROFILE%\.dsh\profiles\desktop\node_modules\yaml\dist\index.js
   ```
 
-- **`unpack-dsh.mjs`** —— 从 DSH Desktop 的 `app.asar` 解出实现代码，供冒烟测试用（见上）。
+- **`unpack-dsh.mjs`** —— 从 DSH Desktop 的 `app.asar` 解出实现代码，供
+  `cordis-smoke.mjs` 与 `contract-0.2.mjs` 用（见上）。
 
 ## 已知边界
 
-- 「未识别家族」的模型不会被补全，需要你自己在 settings.yaml 里手写 `reasoningEfforts`
-  （合法等级键见上表）。官方确认不支持档位的模型同理，但那是**刻意不写**，不建议手写。
+- 「未识别家族」的模型不会被补全，需要你自己在配置里手写 `reasoningEfforts`
+  （合法等级键见上表）。官方配置入口是 **设置 → 插件 → 模型**，也可以直接改
+  `~/.dsh/profiles/<profile>/cordis.patch.yml` 里 `llm-pi-ai` 的 `config.providers`。
+  官方确认不支持档位的模型同理，但那是**刻意不写**，不建议手写。
 - **短别名只在精确匹配时归一化**：目前只有 `k3` → `kimi-k3` 一条 —— 它们是同一个模型
   在两处官方入口下的名字（Kimi Code 用 `k3`，API 开放平台用 `kimi-k3`）。别名只用于查表，
   写回配置的仍是中转站给的原 id。之所以不做子串匹配，是因为 `k3` 这种短 id 当子串用
@@ -299,17 +380,22 @@ dsh plugin --profile desktop add file:C:/Users/<你>/dsh-plugins/dsh-relay-toolk
 - 中转站返回的模型 id 会原样写入；若你的中转站把渠道前缀写进 id（如 `openai/gpt-5.5`），
   同步进来的也就是那个 id。
 - `/models` 请求超时 15 秒，请求体上限 64 KB；返回空列表会报「模型列表为空」并保持配置不变。
-- **多模态能力不来自 `discoverModels`**：DSH 的模型发现只返回
-  `{ id, name, contextWindow, maxTokens }`，**不含**模态信息。所以图像声明只能靠内置的
-  官方能力表，认不出就不写 —— 这是刻意的，不猜。
+- **多模态能力在 0.2 起部分来自 `discoverModels`**：0.2 的模型发现结果新增了
+  `inputModalities`，插件的图像声明因此**发现结果优先**（那是上游或已装目录自己的
+  声明），发现结果没给模态时才退回内置官方能力表；两处都认不出就不写 —— 这是刻意的，不猜。
+  （0.1.5 时代的发现结果只有 `{ id, name, contextWindow, maxTokens }`，
+  所以当时只能靠内置表。）
 
 ## 排障与恢复
 
-**先备份。** 插件只改 `~/.dsh/settings.yaml` 里 `llm-pi-ai.providers[路由].models`，
-但它写的是你的真实配置。动之前复制一份：
+**先备份。** 插件只改 `llm-pi-ai` 这条配置里的 `providers[路由].models`，
+但它写的是你的真实配置。
+
+DSH 0.2 起配置**不再放在 `~/.dsh/settings.yaml`**（旧文件会被一次性导入后改名成
+`.imported`），而是写在 profile 的补丁层里：
 
 ```sh
-copy %USERPROFILE%\.dsh\settings.yaml %USERPROFILE%\.dsh\settings.yaml.bak
+copy %USERPROFILE%\.dsh\profiles\desktop\cordis.patch.yml %USERPROFILE%\.dsh\profiles\desktop\cordis.patch.yml.bak
 ```
 
 改坏了就停掉 DSH Desktop，把 `.bak` 覆盖回去再启动。
@@ -323,6 +409,14 @@ copy %USERPROFILE%\.dsh\settings.yaml %USERPROFILE%\.dsh\settings.yaml.bak
 **区块一直"读取中…"**：先确认插件已随 DSH 启动（见上面的日志），再确认 `/status` 可达 ——
 该路由只接受本机请求，非 loopback 一律 403。
 
+**升级 DSH 后整个区块空白、且没有任何报错**：这是 0.1.5 → 0.2 那次 `settings.get()`
+被移除的典型症状（插件会静默失效）。用契约核对脚本自查：
+
+```sh
+set DSH_UNPACKED=<解包目录>
+node test/contract-0.2.mjs
+```
+
 ## HTTP 端点
 
 设置页用的就是这五个端点，挂在 `/api/relay-toolkit` 前缀下，只服务本机（loopback）。
@@ -334,7 +428,7 @@ copy %USERPROFILE%\.dsh\settings.yaml %USERPROFILE%\.dsh\settings.yaml.bak
 | POST | `/sync` | `{ route }` | 拉该路由的 `/models`，追加缺失的模型 |
 | POST | `/autofill` | `{ route?, includeUnknown? }` | 补思考等级；省略 `route` 则处理全部路由 |
 | POST | `/align` | `{ route? }` | 用 `discoverModels` 对齐窗口与输出上限 |
-| POST | `/modalities` | `{ route? }` | 给官方确认能收图的模型补 `input: [text, image]` |
+| POST | `/modalities` | `{ route? }` | 给确认能收图的模型补 `input: [text, image]`（发现结果优先，内置表兜底） |
 | POST | `/probe` | `{ route, models? }` | 发一句 `hi` 实测连通性；**只读**，但会向上游发计费请求 |
 
 `/probe` 是唯一必须显式指定 `route` 的端点 —— 一次点击不该把全部路由都探一遍。
