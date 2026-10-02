@@ -156,6 +156,34 @@ dsh plugin --profile desktop remove dsh-relay-toolkit
 以及混元翻译/角色扮演（`hy-mt2*`、`hy-role`、`hunyuan-role-latest`）与 `glm-ocr`
 这些模型**一个字段都不写**，无论你点哪个按钮。
 
+Grok 的旧型号同理：`grok-4`（含 `-fast` / `-1-fast` / `-0709`）、`grok-code-fast*`、
+`grok-3*`、`grok-2*` 官方都明确不支持 `reasoning_effort`（`grok-4` 始终以固定档位推理；
+`grok-3` 只有 mini 变体有档位，而该家族已于 2026-05-15 整体重定向到 `grok-4.3`）。
+
+### Grok 的档位随版本变（改表时务必留意）
+
+Grok 是这张表里唯一「**同家族不同版本档位不同、且能不能关闭推理也变**」的情况：
+
+| 模型 | 官方档位 | 能否关闭推理 |
+|---|---|---|
+| `grok-4.3` | `none` / `low`(默认) / `medium` / `high` | ✅ 可关 |
+| `grok-4.5` | `low` / `medium` / `high` | ❌ 不可关 |
+| `grok-4.6` | `low`(默认) / `medium` / `high` / `xhigh` | ❌ 不可关 |
+| `grok-4.7` | `low` / `medium` / `high`(默认) / `xhigh` | ❌ 不可关 |
+
+**所以这四条必须逐版本分开写，不能合并成一个 `grok-4` 前缀规则** —— 合并会把 4.3 的
+`off` 档安到 4.5/4.6/4.7 上，而 4.5 对 `none` 直接返回 400
+（`This model does not support reasoning_effort value none`，有实测记录）。
+
+核对来源（2026-10-02；`docs.x.ai` 本机不可直连，故用转载 xAI 官方规格的模型卡交叉核对，
+三家彼此一致）：[AWS Bedrock · Grok 4.3](https://docs.aws.eu/bedrock/latest/userguide/model-card-xai-grok-4-3.html)、
+[Cloudflare AI · Grok 4.5](https://developers.cloudflare.com/ai/models/xai/grok-4.5/)、
+[AWS Bedrock · Grok 4.6](https://docs.aws.eu/bedrock/latest/userguide/model-card-xai-grok-4-6.html)、
+[Oracle OCI · Grok 4.7](https://docs.oracle.com/en-us/iaas/Content/generative-ai/x-ai-grok-4-7.htm)。
+另有一条实测旁证：grok-4.5 还接受未公布的 `minimal` 与 `xhigh`（见
+[ghc-proxy 探测报告](https://raw.githubusercontent.com/wxxb789/ghc-proxy/5fb86208379a4f312ff44636cfe26e577ff78327/docs/research/grok-4.5-schema.md)）——
+但插件只写官方公布的档位，不把探测到的额外档位写进配置。
+
 ### 图像输入声明（多模态）
 
 **症状**：模型明明支持图像，`read_image` 却报
@@ -372,7 +400,11 @@ node scripts/sync-to-profile.mjs --profile web
   会误伤任何含 `k3` 的模型 id。
 - **规则表是子串匹配 + 最长命中优先**：`kimi-for-coding` 是 `kimi-for-coding-highspeed`
   的前缀，前者有三档、后者只有 Thinking 开关，全靠最长命中区分开。改动那张表时要保住
-  这个性质，否则会给高速版错误地补上档位。
+  这个性质，否则会给高速版错误地补上档位。Grok 是同类且更险的一对：`grok-4`（不支持档位）
+  是 `grok-4.5`（有档位）的前缀，**判定完全相反**，写错会让 4.5 拿不到档位或让
+  `grok-4` 被错误补上字段。
+- **同家族不同版本的档位可能不同，规则要按版本写**：Grok 4.3 可关推理、4.5 起不可关、
+  4.6/4.7 才多出 `xhigh`。不要图省事合并成家族前缀规则。
 - **最长命中解决不了的，用 `except`**：多模态表里 `mimo-v2.5` 与 `mimo-v2.5-pro` 的
   最长命中长度相同（都是 `mimo-v2.5`），但只有前者官方支持图像输入 —— 这种「共享前缀、
   能力不同」的情况必须显式排除，不能指望最长命中。

@@ -714,10 +714,80 @@ test('noEffortReason 与 suggestEfforts 严格互斥', () => {
 
   // 互斥：能给官方档位建议的模型，绝不能同时被判成「不支持档位」。
   // 这是子串匹配的坑 —— 表里的 `glm-5` 会命中 glm-5.2 / glm-5.3，而它们都有官方档位。
-  for (const id of ['glm-5.2', 'glm-5.3', 'kimi-k3', 'deepseek-v4.1-flash', 'hy3']) {
+  // Grok 是同类坑且更险：`grok-4`（不支持）是 `grok-4.5`（有档位）的前缀。
+  for (const id of ['glm-5.2', 'glm-5.3', 'kimi-k3', 'deepseek-v4.1-flash', 'hy3', 'grok-4.3', 'grok-4.5', 'grok-4.6', 'grok-4.7']) {
     assert.notEqual(suggestEfforts(id), undefined, id + ' 应该有官方档位')
     assert.equal(noEffortReason(id), undefined, id + ' 不该被判成不支持档位')
   }
+})
+
+/**
+ * xAI Grok 的档位回归 —— 来源是 2026-10-02 的官方核对。
+ *
+ * 这一组值得单独钉住，因为 Grok **同家族不同版本的档位不一样**，而且
+ * 「能不能关闭推理」也随版本变：
+ *   - 4.3 可关（有 none）
+ *   - 4.5 起不可关（官方原文 "Reasoning can't be disabled"）
+ * 若把这几条合并成一个 `grok-4` 前缀规则，就会把 4.3 的 off 档错误地
+ * 安到 4.5/4.6/4.7 上 —— 而 4.5 对 `none` 是 400。
+ */
+test('Grok：4.5 起不可关闭推理，绝不写 off 档', () => {
+  // 4.5 官方只有 low/medium/high（Cloudflare AI 模型页）。
+  assert.deepEqual(suggestEfforts('grok-4.5'), { low: 'low', medium: 'medium', high: 'high' })
+
+  // 4.6 / 4.7 官方多了 xhigh（AWS Bedrock / Oracle OCI 模型卡）。
+  const withXhigh = { low: 'low', medium: 'medium', high: 'high', xhigh: 'xhigh' }
+  assert.deepEqual(suggestEfforts('grok-4.6'), withXhigh)
+  assert.deepEqual(suggestEfforts('grok-4.7'), withXhigh)
+
+  // 关键断言：这三条都不能出现 off —— 上游对 none 会直接 400。
+  for (const id of ['grok-4.5', 'grok-4.6', 'grok-4.7']) {
+    assert.equal(
+      Object.hasOwn(suggestEfforts(id) ?? {}, 'off'),
+      false,
+      id + ' 不可关闭推理，绝不能写 off 档'
+    )
+  }
+})
+
+test('Grok：4.3 是唯一可关闭推理的版本', () => {
+  assert.deepEqual(suggestEfforts('grok-4.3'), {
+    off: 'none',
+    low: 'low',
+    medium: 'medium',
+    high: 'high'
+  })
+})
+
+test('Grok：旧型号登记为「官方不支持档位」，不落进认不出家族', () => {
+  // 这些型号官方明确不支持 reasoning_effort。登记它们是为了让界面把
+  // 「官方不支持档位」和「认不出家族」分开报 —— 否则会诱导用户点
+  // 「用通用模板补全」，而那会写出上游不认的字段。
+  for (const id of [
+    'grok-4',
+    'grok-4-fast-reasoning',
+    'grok-4-1-fast-non-reasoning',
+    'grok-4-0709',
+    'grok-code-fast-1',
+    'grok-3',
+    'grok-3-fast',
+    'grok-2-latest'
+  ]) {
+    assert.equal(suggestEfforts(id), undefined, id + ' 不该给档位')
+    assert.notEqual(noEffortReason(id), undefined, id + ' 必须被认得出（否则会落进认不出家族）')
+  }
+})
+
+test('Grok：子串冲突下最长命中优先，4.x 不被 4 盖住', () => {
+  // `grok-4` 是 `grok-4.5` / `grok-4.6` / `grok-4.7` 的前缀，而两者判定相反：
+  // 前者「不支持档位」，后者「有档位」。靠最长命中区分。
+  for (const id of ['grok-4.3', 'grok-4.5', 'grok-4.6', 'grok-4.7']) {
+    assert.equal(noEffortReason(id), undefined, id + ' 不该被 grok-4 那条规则命中')
+    assert.notEqual(suggestEfforts(id), undefined, id + ' 应该有官方档位')
+  }
+  // 反向也要成立：grok-4 本身不给档位。
+  assert.equal(suggestEfforts('grok-4'), undefined)
+  assert.notEqual(noEffortReason('grok-4'), undefined)
 })
 
 test('Kimi 新模型：kimi-for-coding 有档位，而 highspeed 版本不被它盖住', () => {
